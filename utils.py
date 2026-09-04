@@ -50,20 +50,26 @@ def convert_to_pdf(input_file, output_dir="."):
                 raise Exception(f"DOCX to PDF Error: {str(e)}")
 
         raise Exception("PDF कनवर्टर फ़ाइल जनरेट करने में असमर्थ रहा।")
-    else:  # Linux / Render Server (FIXED FOR X11 DISPLAY ERROR)
+    else:  # Linux / Render Server (PERFECT HEADLESS PDF CONVERSION)
+        user_installation = "-env:UserInstallation=file:///tmp/libreoffice_profile"
         cmd = [
-            "libreoffice", 
-            "--headless", 
-            "--invisible", 
-            "--nodefault", 
-            "--noload", 
-            "--nofirststartwizard", 
-            "--convert-to", "pdf", abs_input, 
+            "libreoffice",
+            "--headless",
+            "--invisible",
+            "--nodefault",
+            "--norestore",
+            user_installation,
+            "--convert-to", "pdf", abs_input,
             "--outdir", output_dir
         ]
+        
         env = os.environ.copy()
-        env["SAL_USE_VCLPLUGIN"] = "gen"  # Force GUI-less backend
-        subprocess.run(cmd, check=True, env=env)
+        env["SAL_USE_VCLPLUGIN"] = "gen"
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        
+        if result.returncode != 0 and not os.path.exists(abs_output):
+            raise Exception(f"LibreOffice PDF Conversion Error: {result.stderr or result.stdout}")
 
 def parse_raw_text(raw_text):
     """प्रश्न और विकल्पों को अलग-अलग पार्स करता है"""
