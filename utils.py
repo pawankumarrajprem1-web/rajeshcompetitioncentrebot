@@ -1,15 +1,17 @@
 import os
 import re
 import subprocess
+import shutil
 from docxtpl import RichText
 
 def convert_to_pdf(input_file, output_dir="."):
-    """Windows और Linux/Render (LibreOffice Complete Headless Engine)"""
+    """Linux / Render Server (Enhanced Error Logging & Explicit Path)"""
     abs_input = os.path.abspath(input_file)
+    abs_outdir = os.path.abspath(output_dir)
     out_name = os.path.basename(input_file).rsplit('.', 1)[0] + '.pdf'
-    abs_output = os.path.abspath(os.path.join(output_dir, out_name))
+    abs_output = os.path.join(abs_outdir, out_name)
 
-    if os.name == 'nt':  # Windows PC
+    if os.name == 'nt':  # Windows
         libre_paths = [
             r"C:\Program Files\LibreOffice\program\soffice.exe",
             r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
@@ -17,29 +19,12 @@ def convert_to_pdf(input_file, output_dir="."):
         ]
         for soffice_path in libre_paths:
             try:
-                cmd = [soffice_path, "--headless", "--convert-to", "pdf", abs_input, "--outdir", output_dir]
+                cmd = [soffice_path, "--headless", "--convert-to", "pdf", abs_input, "--outdir", abs_outdir]
                 subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 if os.path.exists(abs_output):
                     return
             except Exception:
                 continue
-
-        if input_file.endswith('.pptx') or input_file.endswith('.ppt'):
-            try:
-                import win32com.client
-                try:
-                    import pythoncom
-                    pythoncom.CoInitialize()
-                except Exception:
-                    pass
-                
-                powerpoint = win32com.client.Dispatch("PowerPoint.Application")
-                deck = powerpoint.Presentations.Open(abs_input, WithWindow=False)
-                deck.SaveAs(abs_output, 32)
-                deck.Close()
-                return
-            except Exception:
-                raise Exception("Windows पर PPT को PDF बनाने के लिए MS PowerPoint का होना आवश्यक है!")
 
         if input_file.endswith('.docx'):
             try:
@@ -49,56 +34,49 @@ def convert_to_pdf(input_file, output_dir="."):
             except Exception as e:
                 raise Exception(f"DOCX to PDF Error: {str(e)}")
 
-        raise Exception("PDF कनवर्टर फ़ाइल जनरेट करने में असमर्थ रहा।")
+        raise Exception("Windows पर PDF जनरेट नहीं हो सका।")
 
-    else:  # Linux / Render Server (Extended Full Code)
-        # Custom User Profile Path creation to prevent profile locking
-        user_profile_dir = os.path.join(output_dir, "lo_profile")
-        if not os.path.exists(user_profile_dir):
-            os.makedirs(user_profile_dir, exist_ok=True)
-            
-        profile_path = os.path.abspath(user_profile_dir)
-        user_inst_arg = f"-env:UserInstallation=file://{profile_path}"
+    else:  # Linux / Render (Docker)
+        # 1. प्रोफाइल फोल्डर बनाएं
+        user_profile_dir = os.path.join(abs_outdir, "lo_profile")
+        os.makedirs(user_profile_dir, exist_ok=True)
         
-        # Complete Command Options list
+        # 2. Command तैयार करें
         cmd = [
             "libreoffice",
             "--headless",
             "--invisible",
-            "--nologo",
             "--nodefault",
             "--nofirststartwizard",
             "--norestore",
-            user_inst_arg,
-            "--convert-to", 
-            "pdf",
+            f"-env:UserInstallation=file://{os.path.abspath(user_profile_dir)}",
+            "--convert-to", "pdf:writer_pdf_Export",
             abs_input,
-            "--outdir", 
-            output_dir
+            "--outdir", abs_outdir
         ]
         
-        # Environment variables setup for Headless Server
         env = os.environ.copy()
         env["SAL_USE_VCLPLUGIN"] = "gen"
         env["DISPLAY"] = ""
-        env["HOME"] = "/tmp"
         
-        # Execute Process
-        result = subprocess.run(
-            cmd, 
-            capture_output=True, 
-            text=True, 
-            env=env
-        )
+        # 3. Process चलाएं
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         
+        # 4. यदि PDF जनरेट नहीं हुआ तो Logs निकालें
         if not os.path.exists(abs_output):
-            err_details = result.stderr.strip() if result.stderr else result.stdout.strip()
-            if not err_details:
-                err_details = "LibreOffice Output file not found after execution."
-            raise Exception(f"LibreOffice Error: {err_details}")
+            stdout_msg = result.stdout.strip() if result.stdout else "None"
+            stderr_msg = result.stderr.strip() if result.stderr else "None"
+            exit_code = result.returncode
+            
+            raise Exception(
+                f"PDF Conversion Failed!\n"
+                f"▪ Exit Code: {exit_code}\n"
+                f"▪ Input File Exists: {os.path.exists(abs_input)}\n"
+                f"▪ STDOUT: {stdout_msg}\n"
+                f"▪ STDERR: {stderr_msg}"
+            )
 
 def parse_raw_text(raw_text):
-    """प्रश्न और विकल्पों को अलग-अलग पार्स करता है"""
     questions_list = []
     q_blocks = re.split(r'\n(?=\s*\d+[\.\)\-])', '\n' + raw_text.strip())
     
@@ -127,7 +105,6 @@ def parse_raw_text(raw_text):
     return questions_list
 
 def format_docx_option(label, opt_text, show_answer=False):
-    """DOCX फ़ाइल में सही उत्तर को Bold करने का फ़ंक्शन"""
     if not opt_text: 
         return ""
     rt = RichText()
