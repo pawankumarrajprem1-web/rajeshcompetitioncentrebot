@@ -4,7 +4,7 @@ import subprocess
 from docxtpl import RichText
 
 def convert_to_pdf(input_file, output_dir="."):
-    """Windows और Linux/Render के लिए कनवर्टर"""
+    """Windows और Linux/Render (LibreOffice Complete Headless Engine)"""
     abs_input = os.path.abspath(input_file)
     out_name = os.path.basename(input_file).rsplit('.', 1)[0] + '.pdf'
     abs_output = os.path.abspath(os.path.join(output_dir, out_name))
@@ -50,22 +50,52 @@ def convert_to_pdf(input_file, output_dir="."):
                 raise Exception(f"DOCX to PDF Error: {str(e)}")
 
         raise Exception("PDF कनवर्टर फ़ाइल जनरेट करने में असमर्थ रहा।")
-    else:  # Linux / Render Server (Clean CLI Fix)
+
+    else:  # Linux / Render Server (Extended Full Code)
+        # Custom User Profile Path creation to prevent profile locking
+        user_profile_dir = os.path.join(output_dir, "lo_profile")
+        if not os.path.exists(user_profile_dir):
+            os.makedirs(user_profile_dir, exist_ok=True)
+            
+        profile_path = os.path.abspath(user_profile_dir)
+        user_inst_arg = f"-env:UserInstallation=file://{profile_path}"
+        
+        # Complete Command Options list
         cmd = [
             "libreoffice",
             "--headless",
-            "--convert-to", "pdf",
+            "--invisible",
+            "--nologo",
+            "--nodefault",
+            "--nofirststartwizard",
+            "--norestore",
+            user_inst_arg,
+            "--convert-to", 
+            "pdf",
             abs_input,
-            "--outdir", output_dir
+            "--outdir", 
+            output_dir
         ]
         
+        # Environment variables setup for Headless Server
         env = os.environ.copy()
         env["SAL_USE_VCLPLUGIN"] = "gen"
+        env["DISPLAY"] = ""
+        env["HOME"] = "/tmp"
         
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        # Execute Process
+        result = subprocess.run(
+            cmd, 
+            capture_output=True, 
+            text=True, 
+            env=env
+        )
         
-        if result.returncode != 0 or not os.path.exists(abs_output):
-            raise Exception(f"LibreOffice Error: {result.stderr or result.stdout}")
+        if not os.path.exists(abs_output):
+            err_details = result.stderr.strip() if result.stderr else result.stdout.strip()
+            if not err_details:
+                err_details = "LibreOffice Output file not found after execution."
+            raise Exception(f"LibreOffice Error: {err_details}")
 
 def parse_raw_text(raw_text):
     """प्रश्न और विकल्पों को अलग-अलग पार्स करता है"""
