@@ -5,10 +5,11 @@ from pymongo import MongoClient
 API_TOKEN = os.getenv("BOT_TOKEN", "")
 MONGO_URI = os.getenv("MONGO_URI", "")
 
-# ⚠️ अपनी Admin Telegram ID डालें (उदा: 123456789)
-ADMIN_ID = int(os.getenv("ADMIN_ID", ""))
+# Admin ID Safe Parsing
+admin_id_raw = os.getenv("ADMIN_ID", "0")
+ADMIN_ID = int(admin_id_raw) if admin_id_raw.isdigit() else 0
 
-BASE_DIR = os.path.dirname(__file__)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PPT_TEMPLATE = os.path.join(BASE_DIR, "template.pptx")
 DOCX_TEMPLATE = os.path.join(BASE_DIR, "template.docx")
 
