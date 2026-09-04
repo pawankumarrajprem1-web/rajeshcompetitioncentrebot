@@ -64,18 +64,13 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
                         new_el = copy.deepcopy(shape.element)
                         target_slide.shapes._spTree.insert_element_before(new_el, 'p:extLst')
                 
+                # Fixed Text Replacement Logic to avoid formatting breakage
                 for shape in target_slide.shapes:
                     if shape.has_text_frame:
                         for p in shape.text_frame.paragraphs:
-                            full_p_text = "".join(r.text for r in p.runs)
                             for key, val in replacements.items():
-                                if key in full_p_text or key in p.text:
-                                    if len(p.runs) > 0:
-                                        p.runs[0].text = p.text.replace(key, val)
-                                        for r in p.runs[1:]: 
-                                            r.text = ""
-                                    else:
-                                        p.text = p.text.replace(key, val)
+                                if key in p.text:
+                                    p.text = p.text.replace(key, val)
 
             prs.save(output_file)
             await loop.run_in_executor(None, convert_to_pdf, output_file, temp_dir)
