@@ -14,27 +14,24 @@ from utils import parse_raw_text, convert_to_pdf, format_docx_option
 
 async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
     """MongoDB से डेटा निकालकर PDF फाइल जनरेट करके भेजता है"""
+    msg = None
     try:
         row = get_test_paper(doc_id)
-    except Exception as e:
-        await bot.send_message(chat_id, f"❌ <b>Database Error:</b> {html.escape(str(e))}")
-        return
+        if not row:
+            await bot.send_message(chat_id, "❌ <b>ID नहीं मिला!</b> कृपया सही ID दर्ज करें।")
+            return
 
-    if not row:
-        await bot.send_message(chat_id, "❌ <b>ID नहीं मिला!</b> कृपया सही ID दर्ज करें।")
-        return
+        topic = row["topic"]
+        raw_text = row["raw_text"]
+        parsed_qs = parse_raw_text(raw_text)
+        
+        await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        msg = await bot.send_message(chat_id, f"⏳ <b>{gen_type}</b> जनरेट हो रहा है, कृपया प्रतीक्षा करें...")
 
-    topic = row["topic"]
-    raw_text = row["raw_text"]
-    parsed_qs = parse_raw_text(raw_text)
-    
-    await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-    msg = await bot.send_message(chat_id, f"⏳ <b>{gen_type}</b> जनरेट हो रहा है, कृपया प्रतीक्षा करें...")
-
-    temp_dir = tempfile.gettempdir()
-    output_pdf = os.path.join(temp_dir, f"{topic.replace(' ', '_')}_{gen_type}_{doc_id}.pdf")
-    
-    try:
+        temp_dir = tempfile.gettempdir()
+        safe_topic = "".join([c if c.isalnum() else "_" for c in topic])
+        output_pdf = os.path.join(temp_dir, f"{safe_topic}_{gen_type}_{doc_id}.pdf")
+        
         loop = asyncio.get_running_loop()
 
         if gen_type == "PPT":
@@ -83,7 +80,7 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             prs.save(output_file)
             await loop.run_in_executor(None, convert_to_pdf, output_file, temp_dir)
 
-        else: # Word / DOCX Formats (Test PDF & Answer Test PDF)
+        else: # Word / DOCX Formats
             if not os.path.exists(DOCX_TEMPLATE):
                 await msg.edit_text("❌ <b>Template Missing:</b> `template.docx` नहीं मिला!")
                 return
@@ -108,21 +105,33 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             await loop.run_in_executor(None, convert_to_pdf, output_file, temp_dir)
 
         generated_pdf_path = output_file.rsplit('.', 1)[0] + ".pdf"
+        
         if os.path.exists(generated_pdf_path):
+            if os.path.exists(output_pdf):
+                os.remove(output_pdf)
             os.rename(generated_pdf_path, output_pdf)
+            
             await bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
             await bot.send_document(
-                chat_id, types.FSInputFile(output_pdf),
+                chat_id, 
+                types.FSInputFile(output_pdf),
                 caption=f"📄 आपका <b>{gen_type}</b> तैयार है!\n🆔 <b>ID:</b> <code>{doc_id}</code>"
             )
+            if msg:
+                await msg.delete()
         else:
-            await msg.edit_text("❌ PDF जनरेट करने में विफलता हुई।")
-        
+            if msg:
+                await msg.edit_text("❌ <b>PDF Generation Error:</b> PDF फाइल नहीं बन सकी।")
+
+        # Cleanup Temp Files
         if os.path.exists(output_file): 
             os.remove(output_file)
         if os.path.exists(output_pdf): 
             os.remove(output_pdf)
-        await msg.delete()
 
     except Exception as e:
-        await msg.edit_text(f"❌ <b>Error:</b> {html.escape(str(e))}")
+        error_msg = f"❌ <b>Error:</b> {html.escape(str(e))}"
+        if msg:
+            await msg.edit_text(error_msg)
+        else:
+            await bot.send_message(chat_id, error_msg)
