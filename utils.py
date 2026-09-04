@@ -50,9 +50,20 @@ def convert_to_pdf(input_file, output_dir="."):
                 raise Exception(f"DOCX to PDF Error: {str(e)}")
 
         raise Exception("PDF कनवर्टर फ़ाइल जनरेट करने में असमर्थ रहा।")
-    else:  # Linux / Render Server
-        cmd = ["libreoffice", "--headless", "--convert-to", "pdf", abs_input, "--outdir", output_dir]
-        subprocess.run(cmd, check=True)
+    else:  # Linux / Render Server (FIXED FOR X11 DISPLAY ERROR)
+        cmd = [
+            "libreoffice", 
+            "--headless", 
+            "--invisible", 
+            "--nodefault", 
+            "--noload", 
+            "--nofirststartwizard", 
+            "--convert-to", "pdf", abs_input, 
+            "--outdir", output_dir
+        ]
+        env = os.environ.copy()
+        env["SAL_USE_VCLPLUGIN"] = "gen"  # Force GUI-less backend
+        subprocess.run(cmd, check=True, env=env)
 
 def parse_raw_text(raw_text):
     """प्रश्न और विकल्पों को अलग-अलग पार्स करता है"""
