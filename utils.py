@@ -36,13 +36,14 @@ def convert_to_pdf(input_file, output_dir="."):
 
         raise Exception("Windows पर PDF जनरेट नहीं हो सका।")
 
-    else:  # Linux / Render (Docker)
-        # 1. प्रोफाइल फोल्डर बनाएं
+    else:  # Linux / Render Server
         user_profile_dir = os.path.join(abs_outdir, "lo_profile")
         os.makedirs(user_profile_dir, exist_ok=True)
         
-        # 2. Command तैयार करें
+        # xvfb-run को कमांड के आगे जोड़ा गया है
         cmd = [
+            "xvfb-run",
+            "--auto-servernum",
             "libreoffice",
             "--headless",
             "--invisible",
@@ -50,17 +51,19 @@ def convert_to_pdf(input_file, output_dir="."):
             "--nofirststartwizard",
             "--norestore",
             f"-env:UserInstallation=file://{os.path.abspath(user_profile_dir)}",
-            "--convert-to", "pdf:writer_pdf_Export",
+            "--convert-to", "pdf",
             abs_input,
             "--outdir", abs_outdir
         ]
         
         env = os.environ.copy()
-        env["SAL_USE_VCLPLUGIN"] = "gen"
-        env["DISPLAY"] = ""
         
-        # 3. Process चलाएं
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        
+        if not os.path.exists(abs_output):
+            stdout_msg = result.stdout.strip() if result.stdout else "None"
+            stderr_msg = result.stderr.strip() if result.stderr else "None"
+            raise Exception(f"PDF Conversion Failed!\nSTDOUT: {stdout_msg}\nSTDERR: {stderr_msg}")
         
         # 4. यदि PDF जनरेट नहीं हुआ तो Logs निकालें
         if not os.path.exists(abs_output):
