@@ -1,12 +1,22 @@
 import uuid
 import html
+import math
 from aiogram import Router, types, F, Bot
 from aiogram.filters import CommandStart, Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, BotCommand
 
-from database import save_test_paper, get_recent_tests, get_total_tests_count
+from config import ADMIN_ID
+from database import (
+    save_test_paper, 
+    get_recent_tests, 
+    get_total_tests_count, 
+    get_user_tests_paginated, 
+    get_all_tests_paginated, 
+    delete_test_paper,
+    get_test_paper
+)
 from pdf_generator import generate_and_send
 from utils import parse_raw_text
 
@@ -24,13 +34,46 @@ async def setup_bot_commands(bot_instance: Bot):
         BotCommand(command="prompt", description="✨ Gemini AI Prompt (फोटो/PDF से प्रश्न बनाएं)"),
         BotCommand(command="cancel", description="❌ चालू प्रक्रिया रद्द करें"),
         BotCommand(command="help", description="❓ सहायता एवं निर्देश"),
-        BotCommand(command="mytests", description="📂 मेरे बनाए गए हालिया टेस्ट"),
+        BotCommand(command="mytests", description="📂 मेरे बनाए गए टेस्ट"),
+        BotCommand(command="alltests", description="👑 सभी टेस्ट (केवल एडमिन)"),
         BotCommand(command="ppt", description="📊 PPT PDF बनाएं (/ppt ID)"),
         BotCommand(command="test", description="📄 Test PDF बनाएं (/test ID)"),
         BotCommand(command="answer", description="✅ Answer PDF बनाएं (/answer ID)"),
         BotCommand(command="stats", description="📈 कुल टेस्ट के आंकड़े"),
     ]
     await bot_instance.set_my_commands(commands)
+
+def build_tests_markup(records, page, total_count, is_admin=False):
+    """पेजिंग और डायरेक्ट एक्शन बटन्स (Test, Ans, PPT, Delete)"""
+    keyboard = []
+    page_size = 5
+    total_pages = math.ceil(total_count / page_size) or 1
+
+    for r in records:
+        doc_id = r["_id"]
+        topic = r.get("topic", "N/A")[:15]
+        
+        keyboard.append([
+            InlineKeyboardButton(text=f"📌 {doc_id} | {topic}", callback_data=f"info_{doc_id}")
+        ])
+        keyboard.append([
+            InlineKeyboardButton(text="📄 Test", callback_data=f"gen_test_{doc_id}"),
+            InlineKeyboardButton(text="✅ Ans", callback_data=f"gen_answer_{doc_id}"),
+            InlineKeyboardButton(text="📊 PPT", callback_data=f"gen_ppt_{doc_id}"),
+            InlineKeyboardButton(text="🗑️ Delete", callback_data=f"del_{doc_id}_{page}_{'adm' if is_admin else 'usr'}")
+        ])
+
+    nav_buttons = []
+    prefix = "adm_page" if is_admin else "usr_page"
+    
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"{prefix}_{page - 1}"))
+    nav_buttons.append(InlineKeyboardButton(text=f"📑 {page}/{total_pages}", callback_data="ignore"))
+    if page < total_pages:
+        nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"{prefix}_{page + 1}"))
+
+    keyboard.append(nav_buttons)
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 @router.message(CommandStart(), StateFilter("*"))
 async def cmd_start(message: types.Message, state: FSMContext):
@@ -41,7 +84,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         "📌 <b>उपलब्ध मुख्य कमांड्स:</b>\n"
         "• /create - नया टेस्ट बनाएं\n"
         "• /prompt - फोटो / PDF से AI प्रश्न बनाने का Prompt\n"
-        "• /mytests - अपने हालिया टेस्ट देखें\n"
+        "• /mytests - अपने बनाए टेस्ट देखें\n"
         "• /cancel - प्रक्रिया रद्द करें\n"
         "• /help - प्रयोग करने की गाइड\n"
         "• /stats - डेटाबेस के आंकड़े\n\n"
@@ -129,22 +172,118 @@ async def cmd_help(event: types.Message | CallbackQuery):
     else:
         await event.reply(help_text)
 
+# 📂 /mytests - अपने बनाए गए सभी टेस्ट पेज बाय पेज देखें
 @router.message(Command("mytests"), StateFilter("*"))
 async def cmd_mytests(message: types.Message):
+    page = 1
+    user_id = message.from_user.id
+    records, total = get_user_tests_paginated(user_id, page=page)
+    
+    if not records:
+        await message.reply("📂 आपने अभी तक कोई टेस्ट पेपर नहीं बनाया है।")
+        return
+
+    text = f"📂 <b>आपके बनाए गए टेस्ट पेपर्स (कुल: {total}):</b>"
+    markup = build_tests_markup(records, page, total, is_admin=False)
+    await message.reply(text, reply_markup=markup)
+
+@router.callback_query(F.data.startswith("usr_page_"))
+async def nav_user_tests(callback: CallbackQuery):
+    page = int(callback.data.split("_")[2])
+    user_id = callback.from_user.id
+    records, total = get_user_tests_paginated(user_id, page=page)
+    
+    text = f"📂 <b>आपके बनाए गए टेस्ट पेपर्स (कुल: {total}):</b>"
+    markup = build_tests_markup(records, page, total, is_admin=False)
+    await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
+
+# 👑 /alltests - एडमिन के लिए बॉट के सभी क्विज़ का एक्सेस
+@router.message(Command("alltests"), StateFilter("*"))
+async def cmd_alltests(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.reply("⚠️ यह कमांड केवल एडमिन के लिए है!")
+        return
+
+    page = 1
+    records, total = get_all_tests_paginated(page=page)
+    if not records:
+        await message.reply("📂 डेटाबेस में कोई भी टेस्ट मौजूद नहीं है।")
+        return
+
+    text = f"👑 <b>सभी यूज़र्स के टेस्ट पेपर्स (ADMIN VIEW - कुल: {total}):</b>"
+    markup = build_tests_markup(records, page, total, is_admin=True)
+    await message.reply(text, reply_markup=markup)
+
+@router.callback_query(F.data.startswith("adm_page_"))
+async def nav_admin_tests(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⚠️ अनुमति नहीं है!", show_alert=True)
+        return
+
+    page = int(callback.data.split("_")[2])
+    records, total = get_all_tests_paginated(page=page)
+    
+    text = f"👑 <b>सभी यूज़र्स के टेस्ट पेपर्स (ADMIN VIEW - कुल: {total}):</b>"
+    markup = build_tests_markup(records, page, total, is_admin=True)
+    await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
+
+# direct PDF button trigger
+@router.callback_query(F.data.startswith("gen_"))
+async def handle_direct_gen(callback: CallbackQuery, bot: Bot):
+    _, gen_type_key, doc_id = callback.data.split("_")
+    type_map = {"test": "Test PDF", "answer": "Answer Test PDF", "ppt": "PPT"}
+    gen_type = type_map.get(gen_type_key, "Test PDF")
+    
+    row = get_test_paper(doc_id)
+    if not row:
+        await callback.answer("❌ ID नहीं मिला!", show_alert=True)
+        return
+        
+    if row.get("user_id") and row.get("user_id") != callback.from_user.id and callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ यह आपके द्वारा नहीं बनाया गया है!", show_alert=True)
+        return
+
+    await callback.answer(f"⏳ {gen_type} बनाया जा रहा है...")
     try:
-        records = get_recent_tests(5)
-        if not records:
-            await message.reply("📂 अभी तक कोई टेस्ट पेपर सेव नहीं हुआ है।")
-            return
-            
-        text = "📂 <b>हाल ही में बनाए गए टेस्ट पेपर्स:</b>\n\n"
-        for r in records:
-            text += f"🆔 <b>ID:</b> <code>{r['_id']}</code> | 📌 <b>Topic:</b> {r.get('topic', 'N/A')}\n"
-            text += f"└ <code>/test {r['_id']}</code> | <code>/answer {r['_id']}</code> | <code>/ppt {r['_id']}</code>\n\n"
-            
-        await message.reply(text)
+        await generate_and_send(bot, callback.message.chat.id, doc_id, gen_type)
     except Exception as e:
-        await message.reply(f"❌ <b>Error:</b> {html.escape(str(e))}")
+        await callback.message.reply(f"❌ Error: {html.escape(str(e))}")
+
+# Delete Button Handler
+@router.callback_query(F.data.startswith("del_"))
+async def handle_delete_test(callback: CallbackQuery):
+    _, doc_id, page_str, mode = callback.data.split("_")
+    page = int(page_str)
+    is_admin = (mode == "adm")
+
+    row = get_test_paper(doc_id)
+    if not row:
+        await callback.answer("❌ ID नहीं मिला!", show_alert=True)
+        return
+
+    if row.get("user_id") and row.get("user_id") != callback.from_user.id and callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ आप इसे डिलीट नहीं कर सकते!", show_alert=True)
+        return
+
+    if delete_test_paper(doc_id):
+        await callback.answer("✅ टेस्ट डिलीट हो गया!", show_alert=True)
+        if is_admin:
+            records, total = get_all_tests_paginated(page=page)
+        else:
+            records, total = get_user_tests_paginated(callback.from_user.id, page=page)
+
+        if not records and page > 1:
+            page -= 1
+            records, total = get_all_tests_paginated(page) if is_admin else get_user_tests_paginated(callback.from_user.id, page)
+
+        if not records:
+            await callback.message.edit_text("📂 अब कोई टेस्ट मौजूद नहीं है।")
+        else:
+            text = f"{'👑 <b>सभी यूज़र्स के टेस्ट' if is_admin else '📂 <b>आपके बनाए गए टेस्ट'} पेपर्स (कुल: {total}):</b>"
+            markup = build_tests_markup(records, page, total, is_admin=is_admin)
+            await callback.message.edit_text(text, reply_markup=markup)
 
 @router.message(Command("stats"), StateFilter("*"))
 async def cmd_stats(message: types.Message):
@@ -215,7 +354,7 @@ async def collect_questions(message: types.Message, state: FSMContext, bot: Bot)
         doc_id = uuid.uuid4().hex[:6].upper()
         
         try:
-            save_test_paper(doc_id, topic, raw_text)
+            save_test_paper(doc_id, topic, raw_text, message.from_user.id)
         except Exception as e:
             await message.reply(f"❌ <b>Database Insert Failed:</b> {html.escape(str(e))}")
             return
@@ -232,7 +371,10 @@ async def collect_questions(message: types.Message, state: FSMContext, bot: Bot)
         await message.reply(success_msg)
         await state.clear()
         
-        await generate_and_send(bot, message.chat.id, doc_id, selected_format)
+        try:
+            await generate_and_send(bot, message.chat.id, doc_id, selected_format)
+        except Exception as e:
+            await message.reply(f"❌ <b>Error:</b> {html.escape(str(e))}")
         return
 
     user_data = await state.get_data()
@@ -241,15 +383,19 @@ async def collect_questions(message: types.Message, state: FSMContext, bot: Bot)
     await state.update_data(raw_questions=new_raw)
     
     parsed = parse_raw_text(new_raw)
-    await message.reply(f"📥 <b>प्रश्न जोड़ दिए गए! (कुल: {len(parsed)})</b>\nऔर प्रश्न भेजें या जनरेट करने के लिए <b>/done</b> टाइप करें।")
+    await message.reply(f"📥 <b>प्रश्न जोड़ दिए गए! (कुल: {len(parsed)})</b>\nऔर प्रश्न भेजें या <b>/done</b> टाइप करें।")
 
+# 🔗 पुराने वाले ID कमांड्स (Exact same behaviour kept)
 @router.message(Command("ppt"), StateFilter("*"))
 async def cmd_ppt(message: types.Message, bot: Bot):
     args = message.text.split()
     if len(args) < 2:
         await message.reply("⚠️ कृपया ID दर्ज करें। उदाहरण: <code>/ppt A1B2C3</code>")
         return
-    await generate_and_send(bot, message.chat.id, args[1].upper(), "PPT")
+    try:
+        await generate_and_send(bot, message.chat.id, args[1].strip().upper(), "PPT")
+    except Exception as e:
+        await message.reply(f"❌ <b>Error:</b> {html.escape(str(e))}")
 
 @router.message(Command("test"), StateFilter("*"))
 async def cmd_test(message: types.Message, bot: Bot):
@@ -257,7 +403,10 @@ async def cmd_test(message: types.Message, bot: Bot):
     if len(args) < 2:
         await message.reply("⚠️ कृपया ID दर्ज करें। उदाहरण: <code>/test A1B2C3</code>")
         return
-    await generate_and_send(bot, message.chat.id, args[1].upper(), "Test PDF")
+    try:
+        await generate_and_send(bot, message.chat.id, args[1].strip().upper(), "Test PDF")
+    except Exception as e:
+        await message.reply(f"❌ <b>Error:</b> {html.escape(str(e))}")
 
 @router.message(Command("answer"), StateFilter("*"))
 async def cmd_answer(message: types.Message, bot: Bot):
@@ -265,4 +414,7 @@ async def cmd_answer(message: types.Message, bot: Bot):
     if len(args) < 2:
         await message.reply("⚠️ कृपया ID दर्ज करें। उदाहरण: <code>/answer A1B2C3</code>")
         return
-    await generate_and_send(bot, message.chat.id, args[1].upper(), "Answer Test PDF")
+    try:
+        await generate_and_send(bot, message.chat.id, args[1].strip().upper(), "Answer Test PDF")
+    except Exception as e:
+        await message.reply(f"❌ <b>Error:</b> {html.escape(str(e))}")
