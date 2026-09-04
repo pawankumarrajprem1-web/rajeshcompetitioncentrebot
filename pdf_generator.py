@@ -13,7 +13,7 @@ from database import get_test_paper
 from utils import parse_raw_text, convert_to_pdf, format_docx_option
 
 async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
-    """MongoDB से डेटा निकालकर PDF फाइल जनरेट करके भेजता है"""
+    """MongoDB से डेटा निकालकर PPT/Test/Answer PDF जनरेट करके भेजता है"""
     msg = None
     try:
         row = get_test_paper(doc_id)
@@ -74,7 +74,7 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             prs.save(output_file)
             await loop.run_in_executor(None, convert_to_pdf, output_file, temp_dir)
 
-        else: # Word / DOCX Formats
+        else: # Word / DOCX Formats (Test PDF & Answer Test PDF)
             if not os.path.exists(DOCX_TEMPLATE):
                 await msg.edit_text("❌ <b>Template Missing:</b> `template.docx` नहीं मिला!")
                 return
@@ -117,7 +117,6 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             if msg:
                 await msg.edit_text("❌ <b>PDF Generation Error:</b> PDF फाइल नहीं बन सकी।")
 
-        # Cleanup Temp Files
         if os.path.exists(output_file): 
             os.remove(output_file)
         if os.path.exists(output_pdf): 
