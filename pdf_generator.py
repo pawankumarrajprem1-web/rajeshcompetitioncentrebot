@@ -46,6 +46,12 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
         raw_text = row["raw_text"]
         parsed_qs = parse_raw_text(raw_text)
         
+        # 🔍 डिबग फ़ंक्शन को यहाँ कॉल किया गया है (टर्मिनल में लॉग्स देखने के लिए)
+        try:
+            debug_check_parsed_data(doc_id)
+        except Exception as dbg_err:
+            print(f"Debug function error: {dbg_err}")
+
         await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
         msg = await bot.send_message(chat_id, f"⏳ <b>{gen_type}</b> जनरेट हो रहा है, कृपया प्रतीक्षा करें...")
 
