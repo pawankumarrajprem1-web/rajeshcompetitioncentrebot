@@ -126,7 +126,7 @@ def parse_raw_text(raw_text):
         
         val_a, val_b, val_c, val_d = "", "", "", ""
 
-        # 1. Standard Regex Search ((a), A., (A), A) etc.)
+        # Regex search jo Green Tick (✅) aur asterisks (*) ko bhi support kare
         opt_a = re.search(r'(?:^|\n|\s*)(?:\([aA]\)|[aA][\.\)\-])\s*(.*?)(?=(?:\([bB]\)|[bB][\.\)\-])|$)', full_text, re.DOTALL)
         opt_b = re.search(r'(?:^|\n|\s*)(?:\([bB]\)|[bB][\.\)\-])\s*(.*?)(?=(?:\([cC]\)|[cC][\.\)\-])|$)', full_text, re.DOTALL)
         opt_c = re.search(r'(?:^|\n|\s*)(?:\([cC]\)|[cC][\.\)\-])\s*(.*?)(?=(?:\([dD]\)|[dD][\.\)\-])|$)', full_text, re.DOTALL)
@@ -138,27 +138,16 @@ def parse_raw_text(raw_text):
             val_c = opt_c.group(1).strip() if opt_c else ''
             val_d = opt_d.group(1).strip() if opt_d else ''
 
-        # 2. Universal Robust Fallback: Agar regex fail ho jaye (Hindi/Custom formatting ya single-line options ke liye)
+        # Line-by-line fallback agar regex fail ho
         if not (val_a and val_b):
-            clean_pattern = r'^[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}\s]+\s*'
             opt_lines = lines[1:]
+            clean_pattern = r'^[\(\[\{]?[a-dA-D1-4][\.\)\-\]\}\s]+\s*'
             
-            # Agar options alag-alag lines me hain
-            if len(opt_lines) >= 2:
-                cleaned = [re.sub(clean_pattern, '', opt).strip() for opt in opt_lines]
-                val_a = cleaned[0] if len(cleaned) > 0 else ''
-                val_b = cleaned[1] if len(cleaned) > 1 else ''
-                val_c = cleaned[2] if len(cleaned) > 2 else ''
-                val_d = cleaned[3] if len(cleaned) > 3 else ''
-            
-            # Agar sabhi options ek hi line me spaced hain
-            elif len(opt_lines) == 1:
-                parts = re.split(r'\s{2,}|\t|(?=[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}])', opt_lines[0])
-                parts = [re.sub(clean_pattern, '', p).strip() for p in parts if p.strip()]
-                val_a = parts[0] if len(parts) > 0 else ''
-                val_b = parts[1] if len(parts) > 1 else ''
-                val_c = parts[2] if len(parts) > 2 else ''
-                val_d = parts[3] if len(parts) > 3 else ''
+            cleaned = [re.sub(clean_pattern, '', opt).strip() for opt in opt_lines]
+            val_a = cleaned[0] if len(cleaned) > 0 else ''
+            val_b = cleaned[1] if len(cleaned) > 1 else ''
+            val_c = cleaned[2] if len(cleaned) > 2 else ''
+            val_d = cleaned[3] if len(cleaned) > 3 else ''
 
         questions_list.append({
             'text': q_text.strip(),
