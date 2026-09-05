@@ -12,7 +12,7 @@ from docxtpl import DocxTemplate
 
 from config import PPT_TEMPLATE, DOCX_TEMPLATE
 from database import get_test_paper
-from utils import parse_raw_text, convert_to_pdf, format_docx_option
+from utils import parse_raw_text, convert_to_pdf
 
 
 def safe_replace_text_in_paragraph(paragraph, old_key, new_val):
@@ -113,17 +113,21 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
                 
             output_file = os.path.join(temp_dir, f"temp_{doc_id}_{session_id}.docx")
             doc = DocxTemplate(DOCX_TEMPLATE)
-            show_answers = (gen_type == "Answer Test PDF")
             
             formatted_qs = []
             for q in parsed_qs:
-                # format_docx_option ka upayog karke extra spaces, [Ans] tag aur Bold format sahi karein
+                # [Ans], ✅, * sabhi tags ko clean karein
+                clean_a = re.sub(r'✅|\*|\[ans\]', '', q['a'], flags=re.IGNORECASE).strip()
+                clean_b = re.sub(r'✅|\*|\[ans\]', '', q['b'], flags=re.IGNORECASE).strip()
+                clean_c = re.sub(r'✅|\*|\[ans\]', '', q['c'], flags=re.IGNORECASE).strip()
+                clean_d = re.sub(r'✅|\*|\[ans\]', '', q['d'], flags=re.IGNORECASE).strip()
+
                 formatted_qs.append({
                     'text': q['text'].strip(),
-                    'opt_a': format_docx_option("(a)", q['a'], show_answers),
-                    'opt_b': format_docx_option("(b)", q['b'], show_answers),
-                    'opt_c': format_docx_option("(c)", q['c'], show_answers),
-                    'opt_d': format_docx_option("(d)", q['d'], show_answers),
+                    'opt_a': f"(a) {clean_a}",
+                    'opt_b': f"(b) {clean_b}",
+                    'opt_c': f"(c) {clean_c}",
+                    'opt_d': f"(d) {clean_d}",
                 })
             
             doc.render({'topic_name': topic, 'questions': formatted_qs})
