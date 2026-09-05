@@ -126,9 +126,7 @@ def parse_raw_text(raw_text):
         q_text = re.sub(r'^\d+[\.\)\-]\s*', '', lines[0])
         opt_lines = lines[1:]
         
-        val_a, val_b, val_c, val_d = "", "", "", ""
-        
-        # Har option ke aage se a), b), c), d) ya (a), (b) jaisa prefix hatane ke liye
+        # Har option ke aage se a), b), c), d) ya (a), (b) jaisa prefix hatane ke liye (lekin ✅ ya * ko rehne denge)
         clean_pattern = r'^[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}\s]+\s*'
         
         cleaned_options = []
@@ -160,12 +158,14 @@ def format_docx_option(label, opt_text, show_answer=False):
     rt = RichText()
     is_answer = "✅" in opt_text or "*" in opt_text
     
-    # Green Tick ya Asterisk ko text se saaf karein
+    # Tick mark aur Star ko text se saaf karein
     cleaned = opt_text.replace("✅", "").replace("*", "").strip()
+    full_text = f"{label} {cleaned}"
     
+    # Agar Answer Test PDF ban rahe hain aur ye sahi option hai, to poora option Bold ho jayega
     if show_answer and is_answer:
-        rt.add(f"{label} {cleaned}", bold=True, color="008000") # Answer mode me Bold aur Green
+        rt.add(full_text, bold=True)
     else:
-        rt.add(f"{label} {cleaned}", bold=False)
+        rt.add(full_text, bold=False)
         
     return rt
