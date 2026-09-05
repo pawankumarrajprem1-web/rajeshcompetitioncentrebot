@@ -27,7 +27,6 @@ def convert_to_pdf(input_file, output_pdf_path):
                 cmd = [soffice_path, "--headless", "--convert-to", "pdf", abs_input, "--outdir", abs_outdir]
                 subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 
-                # Check generated default filename
                 gen_pdf = os.path.splitext(abs_input)[0] + ".pdf"
                 if os.path.exists(gen_pdf):
                     if os.path.exists(abs_output) and gen_pdf != abs_output:
@@ -42,13 +41,11 @@ def convert_to_pdf(input_file, output_pdf_path):
         if input_file.lower().endswith(('.pptx', '.ppt')):
             try:
                 import comtypes.client
-                comtypes.CoInitialize() # Thread Safety
+                comtypes.CoInitialize()
                 
                 powerpoint = comtypes.client.CreateObject("PowerPoint.Application")
-                
-                # Presentation open karein (ReadOnly=True to avoid locks)
                 presentation = powerpoint.Presentations.Open(abs_input, WithWindow=False)
-                presentation.SaveAs(abs_output, 32) # 32 = ppSaveAsPDF
+                presentation.SaveAs(abs_output, 32)
                 presentation.Close()
                 powerpoint.Quit()
                 
@@ -82,7 +79,9 @@ def convert_to_pdf(input_file, output_pdf_path):
         
         export_filter = "pdf:impress_pdf_Export" if input_file.lower().endswith(('.pptx', '.ppt')) else "pdf:writer_pdf_Export"
 
+        # Virtual display (Xvfb) ke sath run karein taaki GUI display error na aaye
         cmd = [
+            "xvfb-run", "--auto-servernum",
             "libreoffice",
             "--headless",
             "--invisible",
@@ -96,15 +95,12 @@ def convert_to_pdf(input_file, output_pdf_path):
         ]
         
         env = os.environ.copy()
-        env["SAL_USE_VCLPLUGIN"] = "gen"
-        env["DISPLAY"] = ""
         
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         
         if os.path.exists(user_profile_dir):
             shutil.rmtree(user_profile_dir, ignore_errors=True)
 
-        # Check default generated output
         gen_pdf = os.path.splitext(abs_input)[0] + ".pdf"
         if os.path.exists(gen_pdf) and gen_pdf != abs_output:
             if os.path.exists(abs_output):
