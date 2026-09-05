@@ -108,6 +108,7 @@ def convert_to_pdf(input_file, output_pdf_path):
         if not os.path.exists(abs_output):
             raise Exception(f"Linux PDF Conversion Failed!\nSTDERR: {result.stderr}")
 
+
 def parse_raw_text(raw_text):
     questions_list = []
     # Question numbers se split karein (e.g., 1., 2), 3-)
@@ -121,33 +122,25 @@ def parse_raw_text(raw_text):
         if not lines: 
             continue
             
+        # Pehli line Question Text hai
         q_text = re.sub(r'^\d+[\.\)\-]\s*', '', lines[0])
-        full_text = "\n".join(lines[1:])
+        opt_lines = lines[1:]
         
         val_a, val_b, val_c, val_d = "", "", "", ""
-
-        # Regex search jo Green Tick (✅) aur asterisks (*) ko bhi support kare
-        opt_a = re.search(r'(?:^|\n|\s*)(?:\([aA]\)|[aA][\.\)\-])\s*(.*?)(?=(?:\([bB]\)|[bB][\.\)\-])|$)', full_text, re.DOTALL)
-        opt_b = re.search(r'(?:^|\n|\s*)(?:\([bB]\)|[bB][\.\)\-])\s*(.*?)(?=(?:\([cC]\)|[cC][\.\)\-])|$)', full_text, re.DOTALL)
-        opt_c = re.search(r'(?:^|\n|\s*)(?:\([cC]\)|[cC][\.\)\-])\s*(.*?)(?=(?:\([dD]\)|[dD][\.\)\-])|$)', full_text, re.DOTALL)
-        opt_d = re.search(r'(?:^|\n|\s*)(?:\([dD]\)|[dD][\.\)\-])\s*(.*?)(?=$)', full_text, re.DOTALL)
         
-        if opt_a and opt_b:
-            val_a = opt_a.group(1).strip()
-            val_b = opt_b.group(1).strip() if opt_b else ''
-            val_c = opt_c.group(1).strip() if opt_c else ''
-            val_d = opt_d.group(1).strip() if opt_d else ''
-
-        # Line-by-line fallback agar regex fail ho
-        if not (val_a and val_b):
-            opt_lines = lines[1:]
-            clean_pattern = r'^[\(\[\{]?[a-dA-D1-4][\.\)\-\]\}\s]+\s*'
-            
-            cleaned = [re.sub(clean_pattern, '', opt).strip() for opt in opt_lines]
-            val_a = cleaned[0] if len(cleaned) > 0 else ''
-            val_b = cleaned[1] if len(cleaned) > 1 else ''
-            val_c = cleaned[2] if len(cleaned) > 2 else ''
-            val_d = cleaned[3] if len(cleaned) > 3 else ''
+        # Har option ke aage se a), b), c), d) ya (a), (b) jaisa prefix hatane ke liye
+        clean_pattern = r'^[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}\s]+\s*'
+        
+        cleaned_options = []
+        for line in opt_lines:
+            clean_opt = re.sub(clean_pattern, '', line).strip()
+            if clean_opt:
+                cleaned_options.append(clean_opt)
+                
+        val_a = cleaned_options[0] if len(cleaned_options) > 0 else ''
+        val_b = cleaned_options[1] if len(cleaned_options) > 1 else ''
+        val_c = cleaned_options[2] if len(cleaned_options) > 2 else ''
+        val_d = cleaned_options[3] if len(cleaned_options) > 3 else ''
 
         questions_list.append({
             'text': q_text.strip(),
@@ -158,16 +151,21 @@ def parse_raw_text(raw_text):
         })
             
     return questions_list
-    
+
+
 def format_docx_option(label, opt_text, show_answer=False):
     if not opt_text: 
         return ""
+        
     rt = RichText()
     is_answer = "✅" in opt_text or "*" in opt_text
+    
+    # Green Tick ya Asterisk ko text se saaf karein
     cleaned = opt_text.replace("✅", "").replace("*", "").strip()
     
     if show_answer and is_answer:
-        rt.add(f"{label} {cleaned}", bold=True)
+        rt.add(f"{label} {cleaned}", bold=True, color="008000") # Answer mode me Bold aur Green
     else:
         rt.add(f"{label} {cleaned}", bold=False)
+        
     return rt
