@@ -4,6 +4,7 @@ import asyncio
 import tempfile
 import html
 import uuid
+import re
 from aiogram import Bot, types
 from aiogram.enums import ChatAction
 from pptx import Presentation
@@ -11,7 +12,7 @@ from docxtpl import DocxTemplate
 
 from config import PPT_TEMPLATE, DOCX_TEMPLATE
 from database import get_test_paper
-from utils import parse_raw_text, convert_to_pdf
+from utils import parse_raw_text, convert_to_pdf, format_docx_option
 
 
 def safe_replace_text_in_paragraph(paragraph, old_key, new_val):
@@ -46,7 +47,7 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
         raw_text = row["raw_text"]
         parsed_qs = parse_raw_text(raw_text)
         
-        # 🔍 डिबग फ़ंक्शन को यहाँ कॉल किया गया है (टर्मिनल में लॉग्स देखने के लिए)
+        # 🔍 डिबग फ़ंक्शन
         try:
             debug_check_parsed_data(doc_id)
         except Exception as dbg_err:
@@ -81,10 +82,10 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
                         sp_tree.insert_element_before(new_el, 'p:extLst')
 
             for index, (slide, q) in enumerate(zip(prs.slides, parsed_qs), 1):
-                cl_a = q['a'].replace("✅", "").replace("*", "").strip()
-                cl_b = q['b'].replace("✅", "").replace("*", "").strip()
-                cl_c = q['c'].replace("✅", "").replace("*", "").strip()
-                cl_d = q['d'].replace("✅", "").replace("*", "").strip()
+                cl_a = re.sub(r'✅|\*|\[ans\]', '', q['a'], flags=re.IGNORECASE).strip()
+                cl_b = re.sub(r'✅|\*|\[ans\]', '', q['b'], flags=re.IGNORECASE).strip()
+                cl_c = re.sub(r'✅|\*|\[ans\]', '', q['c'], flags=re.IGNORECASE).strip()
+                cl_d = re.sub(r'✅|\*|\[ans\]', '', q['d'], flags=re.IGNORECASE).strip()
                 
                 replacements = {
                     '{{TOPIC}}': str(topic), 
@@ -116,24 +117,13 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             
             formatted_qs = []
             for q in parsed_qs:
-                # Green tick/star साफ करें
-                opt_a_clean = q['a'].replace("✅", "").replace("*", "").strip()
-                opt_b_clean = q['b'].replace("✅", "").replace("*", "").strip()
-                opt_c_clean = q['c'].replace("✅", "").replace("*", "").strip()
-                opt_d_clean = q['d'].replace("✅", "").replace("*", "").strip()
-
-                # चेक करें कि कौन सा ऑप्शन सही उत्तर है
-                is_a_ans = "✅" in q['a'] or "*" in q['a']
-                is_b_ans = "✅" in q['b'] or "*" in q['b']
-                is_c_ans = "✅" in q['c'] or "*" in q['c']
-                is_d_ans = "✅" in q['d'] or "*" in q['d']
-
+                # format_docx_option ka upayog karke extra spaces, [Ans] tag aur Bold format sahi karein
                 formatted_qs.append({
-                    'text': q['text'],
-                    'opt_a': f"(a) {opt_a_clean}" + ("  [Ans]" if show_answers and is_a_ans else ""),
-                    'opt_b': f"(b) {opt_b_clean}" + ("  [Ans]" if show_answers and is_b_ans else ""),
-                    'opt_c': f"(c) {opt_c_clean}" + ("  [Ans]" if show_answers and is_c_ans else ""),
-                    'opt_d': f"(d) {opt_d_clean}" + ("  [Ans]" if show_answers and is_d_ans else ""),
+                    'text': q['text'].strip(),
+                    'opt_a': format_docx_option("(a)", q['a'], show_answers),
+                    'opt_b': format_docx_option("(b)", q['b'], show_answers),
+                    'opt_c': format_docx_option("(c)", q['c'], show_answers),
+                    'opt_d': format_docx_option("(d)", q['d'], show_answers),
                 })
             
             doc.render({'topic_name': topic, 'questions': formatted_qs})
