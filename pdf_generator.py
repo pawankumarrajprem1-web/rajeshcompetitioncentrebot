@@ -8,11 +8,11 @@ import re
 from aiogram import Bot, types
 from aiogram.enums import ChatAction
 from pptx import Presentation
-from docxtpl import DocxTemplate, RichText
+from docxtpl import DocxTemplate
 
 from config import PPT_TEMPLATE, DOCX_TEMPLATE
 from database import get_test_paper
-from utils import parse_raw_text, convert_to_pdf
+from utils import parse_raw_text, convert_to_pdf, format_docx_option
 
 
 def safe_replace_text_in_paragraph(paragraph, old_key, new_val):
@@ -30,30 +30,6 @@ def safe_replace_text_in_paragraph(paragraph, old_key, new_val):
         paragraph.runs[0].text = full_text
         for run in paragraph.runs[1:]:
             run.text = ""
-
-
-def format_option_richtext(label, raw_opt_text, show_answer=False):
-    """Option text me se [Ans]/✅/* hatata hai aur Answer mode me pura option BOLD banata hai"""
-    if not raw_opt_text:
-        return ""
-
-    rt = RichText()
-    
-    # Check karein ki option correct answer hai ya nahi
-    is_answer = bool(re.search(r'✅|\*|\[ans\]', raw_opt_text, re.IGNORECASE))
-    
-    # Text se [Ans], ✅, aur * ko puri tarah hata dein
-    cleaned_text = re.sub(r'✅|\*|\[ans\]', '', raw_opt_text, flags=re.IGNORECASE).strip()
-    
-    full_string = f"{label} {cleaned_text}"
-
-    # Agar Answer Test PDF hai aur ye sahi jawab hai, to ise BOLD karein
-    if show_answer and is_answer:
-        rt.add(full_string, bold=True)
-    else:
-        rt.add(full_string, bold=False)
-
-    return rt
 
 
 async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
@@ -106,10 +82,10 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
                         sp_tree.insert_element_before(new_el, 'p:extLst')
 
             for index, (slide, q) in enumerate(zip(prs.slides, parsed_qs), 1):
-                cl_a = re.sub(r'✅|\*|\[ans\]', '', q['a'], flags=re.IGNORECASE).strip()
-                cl_b = re.sub(r'✅|\*|\[ans\]', '', q['b'], flags=re.IGNORECASE).strip()
-                cl_c = re.sub(r'✅|\*|\[ans\]', '', q['c'], flags=re.IGNORECASE).strip()
-                cl_d = re.sub(r'✅|\*|\[ans\]', '', q['d'], flags=re.IGNORECASE).strip()
+                cl_a = q['a'].replace("✅", "").replace("*", "").replace("[Ans]", "").replace("[ans]", "").strip()
+                cl_b = q['b'].replace("✅", "").replace("*", "").replace("[Ans]", "").replace("[ans]", "").strip()
+                cl_c = q['c'].replace("✅", "").replace("*", "").replace("[Ans]", "").replace("[ans]", "").strip()
+                cl_d = q['d'].replace("✅", "").replace("*", "").replace("[Ans]", "").replace("[ans]", "").strip()
                 
                 replacements = {
                     '{{TOPIC}}': str(topic), 
@@ -142,13 +118,13 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             
             formatted_qs = []
             for q in parsed_qs:
-                # RichText format se option ko BOLD karein aur [Ans] ko saaf karein
+                # utils.py ke format_docx_option ka istemal karke BOLD aur clear option banayein
                 formatted_qs.append({
                     'text': q['text'].strip(),
-                    'opt_a': format_option_richtext("(a)", q['a'], show_answers),
-                    'opt_b': format_option_richtext("(b)", q['b'], show_answers),
-                    'opt_c': format_option_richtext("(c)", q['c'], show_answers),
-                    'opt_d': format_option_richtext("(d)", q['d'], show_answers),
+                    'opt_a': format_docx_option("(a)", q['a'], show_answers),
+                    'opt_b': format_docx_option("(b)", q['b'], show_answers),
+                    'opt_c': format_docx_option("(c)", q['c'], show_answers),
+                    'opt_d': format_docx_option("(d)", q['d'], show_answers),
                 })
             
             doc.render({'topic_name': topic, 'questions': formatted_qs})
