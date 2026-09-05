@@ -113,6 +113,7 @@ def convert_to_pdf(input_file, output_pdf_path):
 
 def parse_raw_text(raw_text):
     questions_list = []
+    # Single questions ya multiple questions ko split karein
     q_blocks = re.split(r'\n(?=\s*\d+[\.\)\-])', '\n' + raw_text.strip())
     
     for block in q_blocks:
@@ -125,18 +126,30 @@ def parse_raw_text(raw_text):
         q_text = re.sub(r'^\d+[\.\)\-]\s*', '', lines[0])
         full_text = "\n".join(lines[1:])
         
-        opt_a = re.search(r'(?:^|\n|\s*)(?:\(a\)|a[\.\)\-])\s*(.*?)(?=(?:\(b\)|b[\.\)\-])|$)', full_text, re.DOTALL | re.IGNORECASE)
-        opt_b = re.search(r'(?:^|\n|\s*)(?:\(b\)|b[\.\)\-])\s*(.*?)(?=(?:\(c\)|c[\.\)\-])|$)', full_text, re.DOTALL | re.IGNORECASE)
-        opt_c = re.search(r'(?:^|\n|\s*)(?:\(c\)|c[\.\)\-])\s*(.*?)(?=(?:\(d\)|d[\.\)\-])|$)', full_text, re.DOTALL | re.IGNORECASE)
-        opt_d = re.search(r'(?:^|\n|\s*)(?:\(d\)|d[\.\)\-])\s*(.*?)(?=$)', full_text, re.DOTALL | re.IGNORECASE)
+        # Flexibly capture options with standard formats (a), A., (A), A) etc.
+        opt_a = re.search(r'(?:^|\n|\s*)(?:\([aA]\)|[aA][\.\)\-])\s*(.*?)(?=(?:\([bB]\)|[bB][\.\)\-])|$)', full_text, re.DOTALL)
+        opt_b = re.search(r'(?:^|\n|\s*)(?:\([bB]\)|[bB][\.\)\-])\s*(.*?)(?=(?:\([cC]\)|[cC][\.\)\-])|$)', full_text, re.DOTALL)
+        opt_c = re.search(r'(?:^|\n|\s*)(?:\([cC]\)|[cC][\.\)\-])\s*(.*?)(?=(?:\([dD]\)|[dD][\.\)\-])|$)', full_text, re.DOTALL)
+        opt_d = re.search(r'(?:^|\n|\s*)(?:\([dD]\)|[dD][\.\)\-])\s*(.*?)(?=$)', full_text, re.DOTALL)
         
-        questions_list.append({
-            'text': q_text.strip(),
-            'a': opt_a.group(1).strip() if opt_a else '',
-            'b': opt_b.group(1).strip() if opt_b else '',
-            'c': opt_c.group(1).strip() if opt_c else '',
-            'd': opt_d.group(1).strip() if opt_d else ''
-        })
+        # Fallback: Agar options multiline format me bina (a),(b) prefix ke hain
+        if not (opt_a or opt_b or opt_c or opt_d) and len(lines) >= 5:
+            questions_list.append({
+                'text': q_text.strip(),
+                'a': lines[1].strip(),
+                'b': lines[2].strip(),
+                'c': lines[3].strip(),
+                'd': lines[4].strip()
+            })
+        else:
+            questions_list.append({
+                'text': q_text.strip(),
+                'a': opt_a.group(1).strip() if opt_a else '',
+                'b': opt_b.group(1).strip() if opt_b else '',
+                'c': opt_c.group(1).strip() if opt_c else '',
+                'd': opt_d.group(1).strip() if opt_d else ''
+            })
+            
     return questions_list
 
 def format_docx_option(label, opt_text, show_answer=False):
