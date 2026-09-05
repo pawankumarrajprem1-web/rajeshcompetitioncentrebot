@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-# System updates, LibreOffice, Java aur Virtual Display (Xvfb) install karein
+# Install LibreOffice, Xvfb, xauth and Fonts
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice \
     libreoffice-impress \
@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice-java-common \
     default-jre \
     xvfb \
+    xauth \
     fonts-deva \
     fonts-noto-ui-core \
     fonts-noto-extra \
@@ -19,11 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Custom fonts folder ko system fonts directory me copy karna
+# Copy custom fonts
 COPY fonts/ /usr/share/fonts/truetype/custom_fonts/
 RUN fc-cache -f -v
 
-# Environment Variables
 ENV PYTHONUNBUFFERED=1
 
 COPY requirements.txt .
