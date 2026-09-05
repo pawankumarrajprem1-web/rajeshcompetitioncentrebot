@@ -77,22 +77,22 @@ def convert_to_pdf(input_file, output_pdf_path):
         user_profile_dir = os.path.join(abs_outdir, "lo_profile")
         os.makedirs(user_profile_dir, exist_ok=True)
         
-        export_filter = "pdf:impress_pdf_Export" if input_file.lower().endswith(('.pptx', '.ppt')) else "pdf:writer_pdf_Export"
+       export_filter = "pdf:impress_pdf_Export" if input_file.lower().endswith(('.pptx', '.ppt')) else "pdf:writer_pdf_Export"
 
         # 👇 PURANE 'cmd = [...]' KO HATA KAR IS NAYE BLOCK KO LAKAR CHIPKAIN 👇
-        cmd = [
-            "xvfb-run", "-a",
-            "libreoffice",
-            "--headless",
-            "--invisible",
-            "--nodefault",
-            "--nofirststartwizard",
-            "--norestore",
-            f"-env:UserInstallation=file://{os.path.abspath(user_profile_dir)}",
-            "--convert-to", export_filter,
-            abs_input,
-            "--outdir", abs_outdir
-        ]
+cmd = [
+    "xvfb-run", "-a",
+    "libreoffice",
+    "--headless",
+    "--invisible",
+    "--nodefault",
+    "--nofirststartwizard",
+    "--norestore",
+    f"-env:UserInstallation=file://{os.path.abspath(user_profile_dir)}",
+    "--convert-to", "pdf",
+    abs_input,
+    "--outdir", abs_outdir
+]
         
         env = os.environ.copy()
         
