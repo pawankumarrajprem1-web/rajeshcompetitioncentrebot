@@ -47,7 +47,6 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
         raw_text = row["raw_text"]
         parsed_qs = parse_raw_text(raw_text)
         
-        # 🔍 डिबग फ़ंक्शन को यहाँ कॉल किया गया है (टर्मिनल में लॉग्स देखने के लिए)
         try:
             debug_check_parsed_data(doc_id)
         except Exception as dbg_err:
@@ -82,10 +81,10 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
                         sp_tree.insert_element_before(new_el, 'p:extLst')
 
             for index, (slide, q) in enumerate(zip(prs.slides, parsed_qs), 1):
-                cl_a = q['a'].replace("✅", "").replace("*", "").replace("[Ans]", "").replace("[ans]", "").strip()
-                cl_b = q['b'].replace("✅", "").replace("*", "").replace("[Ans]", "").replace("[ans]", "").strip()
-                cl_c = q['c'].replace("✅", "").replace("*", "").replace("[Ans]", "").replace("[ans]", "").strip()
-                cl_d = q['d'].replace("✅", "").replace("*", "").replace("[Ans]", "").replace("[ans]", "").strip()
+                cl_a = re.sub(r'✅|\*|\[ans\]', '', q['a'], flags=re.IGNORECASE).strip()
+                cl_b = re.sub(r'✅|\*|\[ans\]', '', q['b'], flags=re.IGNORECASE).strip()
+                cl_c = re.sub(r'✅|\*|\[ans\]', '', q['c'], flags=re.IGNORECASE).strip()
+                cl_d = re.sub(r'✅|\*|\[ans\]', '', q['d'], flags=re.IGNORECASE).strip()
                 
                 replacements = {
                     '{{TOPIC}}': str(topic), 
@@ -117,9 +116,8 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             
             formatted_qs = []
             for q in parsed_qs:
-                # utils.py ka format_docx_option istemal ho raha hai jisse option gayab nahi hoga
                 formatted_qs.append({
-                    'text': q['text'],
+                    'text': q['text'].strip(),
                     'opt_a': format_docx_option("(a)", q['a'], show_answers),
                     'opt_b': format_docx_option("(b)", q['b'], show_answers),
                     'opt_c': format_docx_option("(c)", q['c'], show_answers),
