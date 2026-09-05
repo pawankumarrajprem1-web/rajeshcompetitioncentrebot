@@ -70,10 +70,10 @@ def convert_to_pdf(input_file, output_pdf_path):
         if not os.path.exists(abs_output):
             raise Exception("Windows पर PDF जनरेट नहीं हो सका। कृपया LibreOffice या MS PowerPoint/Word चेक करें।")
 
-   # ==========================================
+    # ==========================================
     # 2. LINUX / RENDER SERVER (Docker Environment)
     # ==========================================
-   else:
+    else:
         user_profile_dir = os.path.join(abs_outdir, "lo_profile")
         os.makedirs(user_profile_dir, exist_ok=True)
         
@@ -95,7 +95,6 @@ def convert_to_pdf(input_file, output_pdf_path):
         env = os.environ.copy()
         
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
-     
         
         if os.path.exists(user_profile_dir):
             shutil.rmtree(user_profile_dir, ignore_errors=True)
