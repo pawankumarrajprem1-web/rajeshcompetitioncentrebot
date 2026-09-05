@@ -101,7 +101,7 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             generated_pdf_path = output_file.rsplit('.', 1)[0] + ".pdf"
             await loop.run_in_executor(None, convert_to_pdf, output_file, generated_pdf_path)
 
-        else: # Word / DOCX Formats
+      else: # Word / DOCX Formats
             if not os.path.exists(DOCX_TEMPLATE):
                 await msg.edit_text("❌ <b>Template Missing:</b> `template.docx` नहीं मिला!")
                 return
@@ -111,9 +111,8 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             show_answers = (gen_type == "Answer Test PDF")
             
             formatted_qs = []
-            for i, q in enumerate(parsed_qs, 1):
+            for q in parsed_qs:
                 formatted_qs.append({
-                    'id': i, 
                     'text': q['text'],
                     'a': format_docx_option("(a)", q['a'], show_answers),
                     'b': format_docx_option("(b)", q['b'], show_answers),
@@ -125,6 +124,7 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             doc.save(output_file)
             generated_pdf_path = output_file.rsplit('.', 1)[0] + ".pdf"
             await loop.run_in_executor(None, convert_to_pdf, output_file, generated_pdf_path)
+            doc.render({'topic_name': topic, 'questions': formatted_qs})
 
         if generated_pdf_path and os.path.exists(generated_pdf_path):
             await bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
