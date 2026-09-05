@@ -110,7 +110,7 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             
             formatted_qs = []
             for q in parsed_qs:
-                # Option sahit poora answer bold hoga aur [Ans] hat jayega
+                # utils.py ke format_docx_option se Option + Answer dono ko saath me Bold format kiya gaya hai
                 formatted_qs.append({
                     'text': q['text'],
                     'opt_a': format_docx_option("(a)", q['a'], show_answers),
