@@ -1,8 +1,0 @@
-aiogram==3.15.0
-pymongo==4.10.1
-certifi==2024.8.30
-python-pptx==1.0.2
-docxtpl==0.19.0
-python-docx
-pillow
-aiohttp==3.10.10
