@@ -16,7 +16,6 @@ def convert_to_pdf(input_file, output_pdf_path):
     # 1. WINDOWS OS (Local VS Code Testing)
     # ==========================================
     if os.name == 'nt':
-        # Step A: LibreOffice check
         libre_paths = [
             r"C:\Program Files\LibreOffice\program\soffice.exe",
             r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
@@ -37,7 +36,6 @@ def convert_to_pdf(input_file, output_pdf_path):
             except Exception:
                 continue
 
-        # Step B: PPTX ke liye PowerPoint COM Automation
         if input_file.lower().endswith(('.pptx', '.ppt')):
             try:
                 import comtypes.client
@@ -57,7 +55,6 @@ def convert_to_pdf(input_file, output_pdf_path):
                 try: comtypes.CoUninitialize()
                 except: pass
 
-        # Step C: DOCX ke liye docx2pdf
         if input_file.lower().endswith(('.docx', '.doc')):
             try:
                 from docx2pdf import convert
@@ -126,14 +123,16 @@ def parse_raw_text(raw_text):
         q_text = re.sub(r'^\d+[\.\)\-]\s*', '', lines[0])
         opt_lines = lines[1:]
         
-        # Har option ke aage se a), b), c), d) ya (a), (b) jaisa prefix hatane ke liye (lekin ✅ ya * ko rehne denge)
-        clean_pattern = r'^[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}\s]+\s*'
+        # Sahi regex pattern jo sirf a), b), (a), (b) jaise prefixes ko hatata hai
+        clean_pattern = r'^\s*(?:[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}\s]+)\s*'
         
         cleaned_options = []
         for line in opt_lines:
             clean_opt = re.sub(clean_pattern, '', line).strip()
-            if clean_opt:
-                cleaned_options.append(clean_opt)
+            # Agar regex sab kuch uda de to original line rakh lein
+            if not clean_opt and line.strip():
+                clean_opt = line.strip()
+            cleaned_options.append(clean_opt)
                 
         val_a = cleaned_options[0] if len(cleaned_options) > 0 else ''
         val_b = cleaned_options[1] if len(cleaned_options) > 1 else ''
@@ -162,7 +161,7 @@ def format_docx_option(label, opt_text, show_answer=False):
     cleaned = opt_text.replace("✅", "").replace("*", "").strip()
     full_text = f"{label} {cleaned}"
     
-    # Agar Answer Test PDF ban rahe hain aur ye sahi option hai, to poora option Bold ho jayega
+    # Agar Answer PDF hai to poora option Bold hoga, [Ans] ya Green color nahi aayega
     if show_answer and is_answer:
         rt.add(full_text, bold=True)
     else:
