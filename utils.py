@@ -123,13 +123,15 @@ def parse_raw_text(raw_text):
         q_text = re.sub(r'^\d+[\.\)\-]\s*', '', lines[0])
         opt_lines = lines[1:]
         
-        # Sahi regex pattern jo sirf a), b), (a), (b) jaise prefixes ko hatata hai
-        clean_pattern = r'^\s*(?:[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}\s]+)\s*'
+        val_a, val_b, val_c, val_d = "", "", "", ""
+        
+        # Sahi Regex jo option ko completely erase nahi hone deta
+        clean_pattern = r'^[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}\s]+\s*'
         
         cleaned_options = []
         for line in opt_lines:
             clean_opt = re.sub(clean_pattern, '', line).strip()
-            # Agar regex sab kuch uda de to original line rakh lein
+            # Agar clean hone ke baad khali ho gaya toh original text rakhenge
             if not clean_opt and line.strip():
                 clean_opt = line.strip()
             cleaned_options.append(clean_opt)
@@ -161,7 +163,7 @@ def format_docx_option(label, opt_text, show_answer=False):
     cleaned = opt_text.replace("✅", "").replace("*", "").strip()
     full_text = f"{label} {cleaned}"
     
-    # Agar Answer PDF hai to poora option Bold hoga, [Ans] ya Green color nahi aayega
+    # Agar Answer Test PDF ban raha hai aur ye sahi Uttar hai, to Option + Text sab Bold ho jayega
     if show_answer and is_answer:
         rt.add(full_text, bold=True)
     else:
