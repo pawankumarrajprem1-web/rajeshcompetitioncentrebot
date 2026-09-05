@@ -19,13 +19,11 @@ def safe_replace_text_in_paragraph(paragraph, old_key, new_val):
     if old_key not in paragraph.text:
         return
 
-    # Method 1: Runs ke andar in-place replacement (Preserves 100% Bold & Template Formatting)
     for run in paragraph.runs:
         if old_key in run.text:
             run.text = run.text.replace(old_key, new_val)
             return
 
-    # Method 2: Agar placeholder XML runs me split ho gaya ho
     full_text = paragraph.text.replace(old_key, new_val)
     if paragraph.runs:
         paragraph.runs[0].text = full_text
@@ -101,7 +99,7 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             generated_pdf_path = output_file.rsplit('.', 1)[0] + ".pdf"
             await loop.run_in_executor(None, convert_to_pdf, output_file, generated_pdf_path)
 
-      else: # Word / DOCX Formats
+        else:
             if not os.path.exists(DOCX_TEMPLATE):
                 await msg.edit_text("❌ <b>Template Missing:</b> `template.docx` नहीं मिला!")
                 return
@@ -124,7 +122,6 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             doc.save(output_file)
             generated_pdf_path = output_file.rsplit('.', 1)[0] + ".pdf"
             await loop.run_in_executor(None, convert_to_pdf, output_file, generated_pdf_path)
-            doc.render({'topic_name': topic, 'questions': formatted_qs})
 
         if generated_pdf_path and os.path.exists(generated_pdf_path):
             await bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
