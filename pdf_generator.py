@@ -108,7 +108,7 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             doc = DocxTemplate(DOCX_TEMPLATE)
             show_answers = (gen_type == "Answer Test PDF")
             
-         formatted_qs = []
+            formatted_qs = []
             for q in parsed_qs:
                 formatted_qs.append({
                     'text': q['text'],
