@@ -113,12 +113,13 @@ def convert_to_pdf(input_file, output_pdf_path):
 
 def parse_raw_text(raw_text):
     questions_list = []
-    # Single questions ya multiple questions ko split karein
+    # Question numbers se split karein (e.g., 1., 2), 3-)
     q_blocks = re.split(r'\n(?=\s*\d+[\.\)\-])', '\n' + raw_text.strip())
     
     for block in q_blocks:
         if not block.strip(): 
             continue
+            
         lines = [line.strip() for line in block.split('\n') if line.strip()]
         if not lines: 
             continue
@@ -126,32 +127,40 @@ def parse_raw_text(raw_text):
         q_text = re.sub(r'^\d+[\.\)\-]\s*', '', lines[0])
         full_text = "\n".join(lines[1:])
         
-        # Flexibly capture options with standard formats (a), A., (A), A) etc.
+        # 1. Standard Regex Search ((a), A., (A), A) etc.)
         opt_a = re.search(r'(?:^|\n|\s*)(?:\([aA]\)|[aA][\.\)\-])\s*(.*?)(?=(?:\([bB]\)|[bB][\.\)\-])|$)', full_text, re.DOTALL)
         opt_b = re.search(r'(?:^|\n|\s*)(?:\([bB]\)|[bB][\.\)\-])\s*(.*?)(?=(?:\([cC]\)|[cC][\.\)\-])|$)', full_text, re.DOTALL)
         opt_c = re.search(r'(?:^|\n|\s*)(?:\([cC]\)|[cC][\.\)\-])\s*(.*?)(?=(?:\([dD]\)|[dD][\.\)\-])|$)', full_text, re.DOTALL)
         opt_d = re.search(r'(?:^|\n|\s*)(?:\([dD]\)|[dD][\.\)\-])\s*(.*?)(?=$)', full_text, re.DOTALL)
         
-        # Fallback: Agar options multiline format me bina (a),(b) prefix ke hain
-        if not (opt_a or opt_b or opt_c or opt_d) and len(lines) >= 5:
-            questions_list.append({
-                'text': q_text.strip(),
-                'a': lines[1].strip(),
-                'b': lines[2].strip(),
-                'c': lines[3].strip(),
-                'd': lines[4].strip()
-            })
-        else:
-            questions_list.append({
-                'text': q_text.strip(),
-                'a': opt_a.group(1).strip() if opt_a else '',
-                'b': opt_b.group(1).strip() if opt_b else '',
-                'c': opt_c.group(1).strip() if opt_c else '',
-                'd': opt_d.group(1).strip() if opt_d else ''
-            })
+        val_a = opt_a.group(1).strip() if opt_a else ''
+        val_b = opt_b.group(1).strip() if opt_b else ''
+        val_c = opt_c.group(1).strip() if opt_c else ''
+        val_d = opt_d.group(1).strip() if opt_d else ''
+
+        # 2. Universal Fallback: Agar regex miss kar jaye aur block me multiple lines hon
+        if not (val_a and val_b) and len(lines) > 1:
+            # Question line ke alawa baki lines ko options me map karein
+            opt_lines = lines[1:]
+            
+            # Agar Devanagari / Custom prefixes hain (e.g., (A) या 1) ), unhe clean karein
+            cleaned_opts = [re.sub(r'^[\(\[\{]?[a-dA-D1-4अ-द][\.\)\-\]\}\s]+', '', opt) for opt in opt_lines]
+            
+            val_a = cleaned_opts[0] if len(cleaned_opts) > 0 else ''
+            val_b = cleaned_opts[1] if len(cleaned_opts) > 1 else ''
+            val_c = cleaned_opts[2] if len(cleaned_opts) > 2 else ''
+            val_d = cleaned_opts[3] if len(cleaned_opts) > 3 else ''
+
+        questions_list.append({
+            'text': q_text.strip(),
+            'a': val_a,
+            'b': val_b,
+            'c': val_c,
+            'd': val_d
+        })
             
     return questions_list
-
+    
 def format_docx_option(label, opt_text, show_answer=False):
     if not opt_text: 
         return ""
