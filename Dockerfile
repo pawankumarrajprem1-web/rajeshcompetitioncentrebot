@@ -1,11 +1,13 @@
 FROM python:3.10-slim
 
-# System updates, LibreOffice aur Hindi Devanagari Fonts install karein
+# System updates, LibreOffice, Java aur Virtual Display (Xvfb) install karein
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice \
     libreoffice-impress \
     libreoffice-writer \
-    libreoffice-script-provider-python \
+    libreoffice-java-common \
+    default-jre \
+    xvfb \
     fonts-deva \
     fonts-noto-ui-core \
     fonts-noto-extra \
@@ -22,7 +24,6 @@ COPY fonts/ /usr/share/fonts/truetype/custom_fonts/
 RUN fc-cache -f -v
 
 # Environment Variables
-ENV SAL_USE_VCLPLUGIN=gen
 ENV PYTHONUNBUFFERED=1
 
 COPY requirements.txt .
