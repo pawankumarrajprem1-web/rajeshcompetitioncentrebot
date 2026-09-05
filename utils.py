@@ -160,11 +160,11 @@ def format_docx_option(label, opt_text, show_answer=False):
     rt = RichText()
     is_answer = "✅" in opt_text or "*" in opt_text
     
-    # Green Tick ya Asterisk ko text se saaf karein
+    # Tick mark aur Star ko text se saaf karein
     cleaned = opt_text.replace("✅", "").replace("*", "").strip()
     full_text = f"{label} {cleaned}"
     
-    # Agar Answer Test PDF hai aur ye sahi option hai, to kewal Bold hoga
+    # Agar Answer mode ON hai aur ye sahi option hai, to kewal Bold hoga
     if show_answer and is_answer:
         rt.add(full_text, bold=True)
     else:
