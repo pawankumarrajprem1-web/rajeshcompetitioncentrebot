@@ -16,6 +16,7 @@ def convert_to_pdf(input_file, output_pdf_path):
     # 1. WINDOWS OS (Local VS Code Testing)
     # ==========================================
     if os.name == 'nt':
+        # Step A: LibreOffice check
         libre_paths = [
             r"C:\Program Files\LibreOffice\program\soffice.exe",
             r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
@@ -36,6 +37,7 @@ def convert_to_pdf(input_file, output_pdf_path):
             except Exception:
                 continue
 
+        # Step B: PPTX ke liye PowerPoint COM Automation
         if input_file.lower().endswith(('.pptx', '.ppt')):
             try:
                 import comtypes.client
@@ -55,6 +57,7 @@ def convert_to_pdf(input_file, output_pdf_path):
                 try: comtypes.CoUninitialize()
                 except: pass
 
+        # Step C: DOCX ke liye docx2pdf
         if input_file.lower().endswith(('.docx', '.doc')):
             try:
                 from docx2pdf import convert
@@ -125,16 +128,14 @@ def parse_raw_text(raw_text):
         
         val_a, val_b, val_c, val_d = "", "", "", ""
         
-        # Sahi Regex jo option ko completely erase nahi hone deta
+        # Har option ke aage se a), b), c), d) ya (a), (b) jaisa prefix hatane ke liye
         clean_pattern = r'^[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}\s]+\s*'
         
         cleaned_options = []
         for line in opt_lines:
             clean_opt = re.sub(clean_pattern, '', line).strip()
-            # Agar clean hone ke baad khali ho gaya toh original text rakhenge
-            if not clean_opt and line.strip():
-                clean_opt = line.strip()
-            cleaned_options.append(clean_opt)
+            if clean_opt:
+                cleaned_options.append(clean_opt)
                 
         val_a = cleaned_options[0] if len(cleaned_options) > 0 else ''
         val_b = cleaned_options[1] if len(cleaned_options) > 1 else ''
@@ -159,14 +160,12 @@ def format_docx_option(label, opt_text, show_answer=False):
     rt = RichText()
     is_answer = "✅" in opt_text or "*" in opt_text
     
-    # Tick mark aur Star ko text se saaf karein
+    # Green Tick ya Asterisk ko text se saaf karein
     cleaned = opt_text.replace("✅", "").replace("*", "").strip()
-    full_text = f"{label} {cleaned}"
     
-    # Agar Answer Test PDF ban raha hai aur ye sahi Uttar hai, to Option + Text sab Bold ho jayega
     if show_answer and is_answer:
-        rt.add(full_text, bold=True)
+        rt.add(f"{label} {cleaned}", bold=True, color="008000") # Answer mode me Bold aur Green
     else:
-        rt.add(full_text, bold=False)
+        rt.add(f"{label} {cleaned}", bold=False)
         
     return rt
