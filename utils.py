@@ -158,13 +158,16 @@ def format_docx_option(label, opt_text, show_answer=False):
         return ""
         
     rt = RichText()
-    is_answer = "✅" in opt_text or "*" in opt_text
     
-    # Green Tick ya Asterisk ko text se saaf karein
-    cleaned = opt_text.replace("✅", "").replace("*", "").strip()
+    # Check karein ki kya text mein ✅, *, ya [Ans] likha hai
+    is_answer = bool(re.search(r'✅|\*|\[ans\]', opt_text, re.IGNORECASE))
+    
+    # Text se ✅, *, aur [Ans] tags ko saaf karein
+    cleaned = re.sub(r'✅|\*|\[ans\]', '', opt_text, flags=re.IGNORECASE).strip()
     
     if show_answer and is_answer:
-        rt.add(f"{label} {cleaned}", bold=True, color="008000") # Answer mode me Bold aur Green
+        # Correct answer ke case me [Ans] hat kar pura option BOLD ho jayega
+        rt.add(f"{label} {cleaned}", bold=True)
     else:
         rt.add(f"{label} {cleaned}", bold=False)
         
