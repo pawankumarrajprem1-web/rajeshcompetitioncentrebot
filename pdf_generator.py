@@ -8,7 +8,7 @@ import re
 from aiogram import Bot, types
 from aiogram.enums import ChatAction
 from pptx import Presentation
-from docxtpl import DocxTemplate
+from docxtpl import DocxTemplate, RichText
 
 from config import PPT_TEMPLATE, DOCX_TEMPLATE
 from database import get_test_paper
@@ -30,6 +30,30 @@ def safe_replace_text_in_paragraph(paragraph, old_key, new_val):
         paragraph.runs[0].text = full_text
         for run in paragraph.runs[1:]:
             run.text = ""
+
+
+def format_option_richtext(label, raw_opt_text, show_answer=False):
+    """Option text me se [Ans]/✅/* hatata hai aur Answer mode me pura option BOLD banata hai"""
+    if not raw_opt_text:
+        return ""
+
+    rt = RichText()
+    
+    # Check karein ki option correct answer hai ya nahi
+    is_answer = bool(re.search(r'✅|\*|\[ans\]', raw_opt_text, re.IGNORECASE))
+    
+    # Text se [Ans], ✅, aur * ko puri tarah hata dein
+    cleaned_text = re.sub(r'✅|\*|\[ans\]', '', raw_opt_text, flags=re.IGNORECASE).strip()
+    
+    full_string = f"{label} {cleaned_text}"
+
+    # Agar Answer Test PDF hai aur ye sahi jawab hai, to ise BOLD karein
+    if show_answer and is_answer:
+        rt.add(full_string, bold=True)
+    else:
+        rt.add(full_string, bold=False)
+
+    return rt
 
 
 async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
@@ -114,20 +138,17 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             output_file = os.path.join(temp_dir, f"temp_{doc_id}_{session_id}.docx")
             doc = DocxTemplate(DOCX_TEMPLATE)
             
+            show_answers = (gen_type == "Answer Test PDF")
+            
             formatted_qs = []
             for q in parsed_qs:
-                # [Ans], ✅, * sabhi tags ko clean karein
-                clean_a = re.sub(r'✅|\*|\[ans\]', '', q['a'], flags=re.IGNORECASE).strip()
-                clean_b = re.sub(r'✅|\*|\[ans\]', '', q['b'], flags=re.IGNORECASE).strip()
-                clean_c = re.sub(r'✅|\*|\[ans\]', '', q['c'], flags=re.IGNORECASE).strip()
-                clean_d = re.sub(r'✅|\*|\[ans\]', '', q['d'], flags=re.IGNORECASE).strip()
-
+                # RichText format se option ko BOLD karein aur [Ans] ko saaf karein
                 formatted_qs.append({
                     'text': q['text'].strip(),
-                    'opt_a': f"(a) {clean_a}",
-                    'opt_b': f"(b) {clean_b}",
-                    'opt_c': f"(c) {clean_c}",
-                    'opt_d': f"(d) {clean_d}",
+                    'opt_a': format_option_richtext("(a)", q['a'], show_answers),
+                    'opt_b': format_option_richtext("(b)", q['b'], show_answers),
+                    'opt_c': format_option_richtext("(c)", q['c'], show_answers),
+                    'opt_d': format_option_richtext("(d)", q['d'], show_answers),
                 })
             
             doc.render({'topic_name': topic, 'questions': formatted_qs})
