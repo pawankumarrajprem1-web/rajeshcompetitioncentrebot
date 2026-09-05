@@ -70,7 +70,7 @@ def convert_to_pdf(input_file, output_pdf_path):
         if not os.path.exists(abs_output):
             raise Exception("Windows पर PDF जनरेट नहीं हो सका। कृपया LibreOffice या MS PowerPoint/Word चेक करें।")
 
-    # ==========================================
+   # ==========================================
     # 2. LINUX / RENDER SERVER (Docker Environment)
     # ==========================================
     else:
@@ -79,9 +79,9 @@ def convert_to_pdf(input_file, output_pdf_path):
         
         export_filter = "pdf:impress_pdf_Export" if input_file.lower().endswith(('.pptx', '.ppt')) else "pdf:writer_pdf_Export"
 
-        # Virtual display (Xvfb) ke sath run karein taaki GUI display error na aaye
+        # 👇 PURANE 'cmd = [...]' KO HATA KAR IS NAYE BLOCK KO LAKAR CHIPKAIN 👇
         cmd = [
-            "xvfb-run", "--auto-servernum",
+            "xvfb-run", "-a",
             "libreoffice",
             "--headless",
             "--invisible",
@@ -97,6 +97,7 @@ def convert_to_pdf(input_file, output_pdf_path):
         env = os.environ.copy()
         
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+     
         
         if os.path.exists(user_profile_dir):
             shutil.rmtree(user_profile_dir, ignore_errors=True)
