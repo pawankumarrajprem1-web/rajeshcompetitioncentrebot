@@ -11,7 +11,7 @@ from docxtpl import DocxTemplate
 
 from config import PPT_TEMPLATE, DOCX_TEMPLATE
 from database import get_test_paper
-from utils import parse_raw_text, convert_to_pdf
+from utils import parse_raw_text, convert_to_pdf, format_docx_option
 
 
 def safe_replace_text_in_paragraph(paragraph, old_key, new_val):
@@ -116,24 +116,12 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             
             formatted_qs = []
             for q in parsed_qs:
-                # Green tick/star साफ करें
-                opt_a_clean = q['a'].replace("✅", "").replace("*", "").strip()
-                opt_b_clean = q['b'].replace("✅", "").replace("*", "").strip()
-                opt_c_clean = q['c'].replace("✅", "").replace("*", "").strip()
-                opt_d_clean = q['d'].replace("✅", "").replace("*", "").strip()
-
-                # चेक करें कि कौन सा ऑप्शन सही उत्तर है
-                is_a_ans = "✅" in q['a'] or "*" in q['a']
-                is_b_ans = "✅" in q['b'] or "*" in q['b']
-                is_c_ans = "✅" in q['c'] or "*" in q['c']
-                is_d_ans = "✅" in q['d'] or "*" in q['d']
-
                 formatted_qs.append({
                     'text': q['text'],
-                    'opt_a': f"(a) {opt_a_clean}" + ("  [Ans]" if show_answers and is_a_ans else ""),
-                    'opt_b': f"(b) {opt_b_clean}" + ("  [Ans]" if show_answers and is_b_ans else ""),
-                    'opt_c': f"(c) {opt_c_clean}" + ("  [Ans]" if show_answers and is_c_ans else ""),
-                    'opt_d': f"(d) {opt_d_clean}" + ("  [Ans]" if show_answers and is_d_ans else ""),
+                    'opt_a': format_docx_option("(a)", q['a'], show_answers),
+                    'opt_b': format_docx_option("(b)", q['b'], show_answers),
+                    'opt_c': format_docx_option("(c)", q['c'], show_answers),
+                    'opt_d': format_docx_option("(d)", q['d'], show_answers),
                 })
             
             doc.render({'topic_name': topic, 'questions': formatted_qs})
