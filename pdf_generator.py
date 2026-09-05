@@ -151,3 +151,29 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
         if generated_pdf_path and os.path.exists(generated_pdf_path): 
             try: os.remove(generated_pdf_path)
             except: pass
+
+
+def debug_check_parsed_data(doc_id: str):
+    """डेटाबेस और पार्सर का लाइव आउटपुट चेक करने के लिए डिबग फ़ंक्शन"""
+    row = get_test_paper(doc_id)
+    if not row:
+        print(f"❌ ID {doc_id} डेटाबेस में नहीं मिला!")
+        return
+    
+    raw_text = row.get("raw_text", "")
+    parsed = parse_raw_text(raw_text)
+    
+    print("\n" + "="*50)
+    print(f"🔍 DEBUG REPORT FOR DOC ID: {doc_id}")
+    print("="*50)
+    print("1. RAW TEXT FROM DATABASE:")
+    print(raw_text)
+    print("-" * 50)
+    print("2. PARSED RESULT (dictionary):")
+    for idx, q in enumerate(parsed, 1):
+        print(f"  Q{idx}: {q.get('text')}")
+        print(f"     A) {q.get('a')}")
+        print(f"     B) {q.get('b')}")
+        print(f"     C) {q.get('c')}")
+        print(f"     D) {q.get('d')}")
+    print("="*50 + "\n")
