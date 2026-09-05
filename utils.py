@@ -124,29 +124,41 @@ def parse_raw_text(raw_text):
         q_text = re.sub(r'^\d+[\.\)\-]\s*', '', lines[0])
         full_text = "\n".join(lines[1:])
         
+        val_a, val_b, val_c, val_d = "", "", "", ""
+
         # 1. Standard Regex Search ((a), A., (A), A) etc.)
         opt_a = re.search(r'(?:^|\n|\s*)(?:\([aA]\)|[aA][\.\)\-])\s*(.*?)(?=(?:\([bB]\)|[bB][\.\)\-])|$)', full_text, re.DOTALL)
         opt_b = re.search(r'(?:^|\n|\s*)(?:\([bB]\)|[bB][\.\)\-])\s*(.*?)(?=(?:\([cC]\)|[cC][\.\)\-])|$)', full_text, re.DOTALL)
         opt_c = re.search(r'(?:^|\n|\s*)(?:\([cC]\)|[cC][\.\)\-])\s*(.*?)(?=(?:\([dD]\)|[dD][\.\)\-])|$)', full_text, re.DOTALL)
         opt_d = re.search(r'(?:^|\n|\s*)(?:\([dD]\)|[dD][\.\)\-])\s*(.*?)(?=$)', full_text, re.DOTALL)
         
-        val_a = opt_a.group(1).strip() if opt_a else ''
-        val_b = opt_b.group(1).strip() if opt_b else ''
-        val_c = opt_c.group(1).strip() if opt_c else ''
-        val_d = opt_d.group(1).strip() if opt_d else ''
+        if opt_a and opt_b:
+            val_a = opt_a.group(1).strip()
+            val_b = opt_b.group(1).strip() if opt_b else ''
+            val_c = opt_c.group(1).strip() if opt_c else ''
+            val_d = opt_d.group(1).strip() if opt_d else ''
 
-        # 2. Universal Fallback: Agar regex miss kar jaye aur block me multiple lines hon
-        if not (val_a and val_b) and len(lines) > 1:
-            # Question line ke alawa baki lines ko options me map karein
+        # 2. Universal Robust Fallback: Agar regex fail ho jaye (Hindi/Custom formatting ya single-line options ke liye)
+        if not (val_a and val_b):
+            clean_pattern = r'^[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}\s]+\s*'
             opt_lines = lines[1:]
             
-            # Agar Devanagari / Custom prefixes hain (e.g., (A) या 1) ), unhe clean karein
-            cleaned_opts = [re.sub(r'^[\(\[\{]?[a-dA-D1-4अ-द][\.\)\-\]\}\s]+', '', opt) for opt in opt_lines]
+            # Agar options alag-alag lines me hain
+            if len(opt_lines) >= 2:
+                cleaned = [re.sub(clean_pattern, '', opt).strip() for opt in opt_lines]
+                val_a = cleaned[0] if len(cleaned) > 0 else ''
+                val_b = cleaned[1] if len(cleaned) > 1 else ''
+                val_c = cleaned[2] if len(cleaned) > 2 else ''
+                val_d = cleaned[3] if len(cleaned) > 3 else ''
             
-            val_a = cleaned_opts[0] if len(cleaned_opts) > 0 else ''
-            val_b = cleaned_opts[1] if len(cleaned_opts) > 1 else ''
-            val_c = cleaned_opts[2] if len(cleaned_opts) > 2 else ''
-            val_d = cleaned_opts[3] if len(cleaned_opts) > 3 else ''
+            # Agar sabhi options ek hi line me spaced hain
+            elif len(opt_lines) == 1:
+                parts = re.split(r'\s{2,}|\t|(?=[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}])', opt_lines[0])
+                parts = [re.sub(clean_pattern, '', p).strip() for p in parts if p.strip()]
+                val_a = parts[0] if len(parts) > 0 else ''
+                val_b = parts[1] if len(parts) > 1 else ''
+                val_c = parts[2] if len(parts) > 2 else ''
+                val_d = parts[3] if len(parts) > 3 else ''
 
         questions_list.append({
             'text': q_text.strip(),
