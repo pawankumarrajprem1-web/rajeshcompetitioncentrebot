@@ -1,407 +1,206 @@
-import uuid
-import html
-import math
+import os
+import copy
 import asyncio
-from aiogram import Router, types, F, Bot
-from aiogram.filters import CommandStart, Command, StateFilter
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, BotCommand
+import tempfile
+import html
+import uuid
+from aiogram import Bot, types
+from aiogram.enums import ChatAction
+from pptx import Presentation
+from docxtpl import DocxTemplate
 
-from config import ADMIN_ID
-from database import (
-    save_test_paper, 
-    get_recent_tests, 
-    get_total_tests_count, 
-    get_user_tests_paginated, 
-    get_all_tests_paginated, 
-    delete_test_paper,
-    get_test_paper
-)
-from pdf_generator import generate_and_send
-from utils import parse_raw_text
+from config import PPT_TEMPLATE, DOCX_TEMPLATE, executor
+from database import get_test_paper
+from utils import parse_raw_text, convert_to_pdf
 
-router = Router()
 
-class QuizForm(StatesGroup):
-    waiting_for_topic = State()
-    waiting_for_format = State()
-    collecting_questions = State()
+def safe_replace_text_in_paragraph(paragraph, old_key, new_val):
+    """Template ke Exact Bold, Font, Color aur Size ko safe rakhte hue text replace karta hai"""
+    if old_key not in paragraph.text:
+        return
 
-async def setup_bot_commands(bot_instance: Bot):
-    commands = [
-        BotCommand(command="start", description="🤖 बॉट शुरू करें"),
-        BotCommand(command="create", description="📝 नया टेस्ट बनाएं"),
-        BotCommand(command="prompt", description="✨ Gemini AI Prompt (फोटो/PDF से प्रश्न बनाएं)"),
-        BotCommand(command="cancel", description="❌ चालू प्रक्रिया रद्द करें"),
-        BotCommand(command="help", description="❓ सहायता एवं निर्देश"),
-        BotCommand(command="mytests", description="📂 मेरे बनाए गए टेस्ट"),
-        BotCommand(command="alltests", description="👑 सभी टेस्ट (केवल एडमिन)"),
-        BotCommand(command="ppt", description="📊 PPT PDF बनाएं (/ppt ID)"),
-        BotCommand(command="test", description="📄 Test PDF बनाएं (/test ID)"),
-        BotCommand(command="answer", description="✅ Answer PDF बनाएं (/answer ID)"),
-        BotCommand(command="stats", description="📈 कुल टेस्ट के आंकड़े"),
-    ]
-    await bot_instance.set_my_commands(commands)
+    for run in paragraph.runs:
+        if old_key in run.text:
+            run.text = run.text.replace(old_key, new_val)
+            return
 
-async def build_tests_markup(records, page, total_count, is_admin=False):
-    """पेजिंग और डायरेक्ट एक्शन बटन्स (Test, Ans, PPT, Delete)"""
-    keyboard = []
-    page_size = 5
-    total_pages = math.ceil(total_count / page_size) or 1
+    full_text = paragraph.text.replace(old_key, new_val)
+    if paragraph.runs:
+        paragraph.runs[0].text = full_text
+        for run in paragraph.runs[1:]:
+            run.text = ""
 
-    for r in records:
-        doc_id = r["_id"]
-        topic = r.get("topic", "N/A")[:15]
+
+def _sync_generate_ppt(doc_id: str, topic: str, parsed_qs: list, session_id: str, temp_dir: str):
+    """Heavy PPT generation and conversion task (Runs in Background Worker Thread)"""
+    output_file = os.path.join(temp_dir, f"temp_{doc_id}_{session_id}.pptx")
+    prs = Presentation(PPT_TEMPLATE)
+    
+    base_slide = prs.slides[0]
+    blank_layout = base_slide.slide_layout
+
+    total_qs = len(parsed_qs)
+    for _ in range(total_qs - 1):
+        new_slide = prs.slides.add_slide(blank_layout)
+        sp_tree = getattr(new_slide.shapes, '_spTree', getattr(new_slide.shapes, '_sptree', None))
+        for shape in base_slide.shapes:
+            new_el = copy.deepcopy(shape.element)
+            if sp_tree is not None:
+                sp_tree.insert_element_before(new_el, 'p:extLst')
+
+    for index, (slide, q) in enumerate(zip(prs.slides, parsed_qs), 1):
+        cl_a = q['a'].replace("✅", "").replace("*", "").strip()
+        cl_b = q['b'].replace("✅", "").replace("*", "").strip()
+        cl_c = q['c'].replace("✅", "").replace("*", "").strip()
+        cl_d = q['d'].replace("✅", "").replace("*", "").strip()
         
-        keyboard.append([
-            InlineKeyboardButton(text=f"📌 {doc_id} | {topic}", callback_data=f"info_{doc_id}")
-        ])
-        keyboard.append([
-            InlineKeyboardButton(text="📄 Test", callback_data=f"gen_test_{doc_id}"),
-            InlineKeyboardButton(text="✅ Ans", callback_data=f"gen_answer_{doc_id}"),
-            InlineKeyboardButton(text="📊 PPT", callback_data=f"gen_ppt_{doc_id}"),
-            InlineKeyboardButton(text="🗑️ Delete", callback_data=f"del_{doc_id}_{page}_{'adm' if is_admin else 'usr'}")
-        ])
-
-    nav_buttons = []
-    prefix = "adm_page" if is_admin else "usr_page"
-    
-    if page > 1:
-        nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"{prefix}_{page - 1}"))
-    nav_buttons.append(InlineKeyboardButton(text=f"📑 {page}/{total_pages}", callback_data="ignore"))
-    if page < total_pages:
-        nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"{prefix}_{page + 1}"))
-
-    keyboard.append(nav_buttons)
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-@router.message(CommandStart(), StateFilter("*"))
-async def cmd_start(message: types.Message, state: FSMContext):
-    await state.clear()
-    welcome_text = (
-        "🤖 <b>Rajesh Competition Centre Bot में आपका स्वागत है!</b>\n\n"
-        "यह बॉट प्रतियोगी परीक्षाओं के लिए क्विज, टेस्ट पेपर्स और PPT PDFs जनरेट करता है।\n\n"
-        "📌 <b>उपलब्ध मुख्य कमांड्स:</b>\n"
-        "• /create - नया टेस्ट बनाएं\n"
-        "• /prompt - फोटो / PDF से AI प्रश्न बनाने का Prompt\n"
-        "• /mytests - अपने बनाए टेस्ट देखें\n"
-        "• /cancel - प्रक्रिया रद्द करें\n"
-        "• /help - प्रयोग करने की गाइड\n"
-        "• /stats - डेटाबेस के आंकड़े\n\n"
-        "शुरू करने के लिए नीचे <b>'Create'</b> बटन दबाएं 👇"
-    )
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 Create (नया बनाएं)", callback_data="btn_create")],
-        [InlineKeyboardButton(text="✨ AI Prompt (फोटो / PDF से प्रश्न)", callback_data="btn_prompt")],
-        [InlineKeyboardButton(text="❓ सहायता (Help)", callback_data="btn_help")]
-    ])
-    await message.reply(welcome_text, reply_markup=keyboard)
-
-@router.message(Command("cancel"), StateFilter("*"))
-async def cmd_cancel(message: types.Message, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state is None:
-        await message.reply("ℹ️ कोई सक्रिय प्रक्रिया जारी नहीं है।")
-        return
-    
-    await state.clear()
-    await message.reply("❌ <b>चालू प्रक्रिया सफलतापूर्वक रद्द (Cancel) कर दी गई है!</b>\n\nनया टेस्ट बनाने के लिए /create टाइप करें।")
-
-@router.message(Command("create"), StateFilter("*"))
-async def cmd_create(message: types.Message, state: FSMContext):
-    await state.clear()
-    await state.set_state(QuizForm.waiting_for_topic)
-    await message.reply("🎯 <b>कृपया अपने टेस्ट पेपर का नाम (Topic Name) दर्ज करें:</b>\n\n<i>(उदाहरण: हर्यक वंश एवं मगध साम्राज्य)</i>")
-
-@router.message(Command("prompt"), StateFilter("*"))
-@router.callback_query(F.data == "btn_prompt")
-async def cmd_prompt(event: types.Message | CallbackQuery):
-    prompt_text = (
-        "✨ <b>Gemini AI क्विज़ मेकर प्रॉम्प्ट (Master Prompt)</b>\n\n"
-        "अगर आपके पास किसी <b>किताब की फोटो, AI, PYQ, PDF या थ्योरी नोट्स</b> हैं, या फिर आप टॉपिक के नाम से प्रश्न बनवाना चाहते हैं, तो नीचे दिए गए बॉक्स पर क्लिक करके <b> Copy</b>  करें:\n\n"
-        "<code>विषय/टॉपिक (Topic Name): [यहाँ अपना टॉपिक लिखें या खाली छोड़ें अगर PDF अटैच है]\n"
-        "प्रश्नों की संख्या (Total Questions): [जितने प्रश्न चाहिए जैसे 30, 50 लिखें]\n\n"
-        "कृपया दिए गए Photo / PDF / PYQ / थ्योरी नोट्स को ध्यान से पढ़ें और इनसे ऑब्जेक्टिव प्रश्न (MCQs) बनाकर मुझे बिल्कुल इसी फॉर्मेट में दें:\n\n"
-        "1. भारत की राजधानी क्या है?\n"
-        "a) मुंबई\n"
-        "b) नई दिल्ली ✅\n"
-        "c) कोलकाता\n"
-        "d) चेन्नई\n\n"
-        "नियम (Strict Rules):\n"
-        "1. जो उत्तर सही (Correct Answer) हो, उसके विकल्प के अंत में अनिवार्य रूप से '✅' ग्रीन टिक लगाएं।\n"
-        "2. अगर यह थ्योरी नोट्स हैं, तो उससे सबसे महत्वपूर्ण प्रश्न खुद बनाएं।\n"
-        "3. अगर यह फोटो या PDF है, तो उसमें मौजूद सभी प्रश्नों को ऊपर दिए गए फॉर्मेट में डिजिटल टेक्स्ट में बदलें।\n"
-        "4. उत्तर देने में कोई भी फालतू बात या परिचय न लिखें। सिर्फ और सिर्फ प्रश्नों की लिस्ट दें।\n"
-        "5. आपके द्वारा दिए जाने वाले सारे के सारे प्रश्न एक ही सिंगल कोडिंग बॉक्स (Code Block) के अंदर होने चाहिए, ताकि एक क्लिक में पूरा टेक्स्ट कॉपी किया जा सके।</code>\n\n"
-        "📌 <b>उपयोग करने की विधि:</b>\n"
-        "1. ऊपर दिए गए कोड पर टैप करके <b> Copy</b>  करें।\n"
-        "2. <b> Google Gemini App</b>  (या चैट) में जाएं।\n"
-        "3. अपनी फोटो / PDF अटैच करें (या बिना अटैच किए टॉपिक और प्रश्नों की संख्या भरें) और यह Prompt पेस्ट करके भेजें।\n"
-        "4. Gemini से मिले उत्तर को सीधे कॉपी करके यहाँ बॉट में <b>/create</b> दबाकर पेस्ट कर दें!"
-    )
-    if isinstance(event, CallbackQuery):
-        await event.message.reply(prompt_text)
-        await event.answer()
-    else:
-        await event.reply(prompt_text)
-
-@router.message(Command("help"), StateFilter("*"))
-@router.callback_query(F.data == "btn_help")
-async def cmd_help(event: types.Message | CallbackQuery):
-    help_text = (
-        "📖 <b>RCC Quiz Bot - गाइड एवं सहायता</b>\n\n"
-        "<b>1. प्रश्न कैसे भेजें?</b>\n"
-        "प्रश्न निम्न फॉर्मेट में भेजें:\n"
-        "<code>1. भारत की राजधानी क्या है?\n"
-        "a) मुंबई\n"
-        "b) नई दिल्ली ✅\n"
-        "c) कोलकाता\n"
-        "d) चेन्नई</code>\n\n"
-        "<b>2. फोटो / PDF से प्रश्न कैसे बनाएं?</b>\n"
-        "• /prompt कमांड टाइप करें और दिए गए प्रॉम्प्ट को Gemini AI में उपयोग करें।\n\n"
-        "<b>3. ID से पुनः PDF डाउनलोड करना:</b>\n"
-        "• PPT के लिए: <code>/ppt &lt;ID&gt;</code>\n"
-        "• केवल प्रश्नों के लिए: <code>/test &lt;ID&gt;</code>\n"
-        "• उत्तर कुंजी सहित: <code>/answer &lt;ID&gt;</code>\n\n"
-        "<b>4. प्रक्रिया रद्द करना:</b>\n"
-        "किसी भी समय /cancel भेजकर प्रक्रिया रोक सकते हैं।"
-    )
-    if isinstance(event, CallbackQuery):
-        await event.message.reply(help_text)
-        await event.answer()
-    else:
-        await event.reply(help_text)
-
-# 📂 /mytests - अपने बनाए गए सभी टेस्ट पेज बाय पेज देखें
-@router.message(Command("mytests"), StateFilter("*"))
-async def cmd_mytests(message: types.Message):
-    page = 1
-    user_id = message.from_user.id
-    records, total = await get_user_tests_paginated(user_id, page=page)
-    
-    if not records:
-        await message.reply("📂आपने अभी तक कोई टेस्ट पेपर नहीं बनाया है।")
-        return
-
-    text = f"📂 <b>आपके बनाए गए टेस्ट पेपर्स (कुल: {total}):</b>"
-    markup = await build_tests_markup(records, page, total, is_admin=False)
-    await message.reply(text, reply_markup=markup)
-
-@router.callback_query(F.data.startswith("usr_page_"))
-async def nav_user_tests(callback: CallbackQuery):
-    page = int(callback.data.split("_")[2])
-    user_id = callback.from_user.id
-    records, total = await get_user_tests_paginated(user_id, page=page)
-    
-    text = f"📂 <b>आपके बनाए गए टेस्ट पेपर्स (कुल: {total}):</b>"
-    markup = await build_tests_markup(records, page, total, is_admin=False)
-    await callback.message.edit_text(text, reply_markup=markup)
-    await callback.answer()
-
-# 👑 /alltests - एडमिन के लिए बॉट के सभी क्विज़ का एक्सेस
-@router.message(Command("alltests"), StateFilter("*"))
-async def cmd_alltests(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.reply("⚠️ यह कमांड केवल एडमिन के लिए है!")
-        return
-
-    page = 1
-    records, total = await get_all_tests_paginated(page=page)
-    if not records:
-        await message.reply("📂 डेटाबेस में कोई भी टेस्ट मौजूद नहीं है।")
-        return
-
-    text = f"👑 <b>सभी यूज़र्स के टेस्ट पेपर्स (ADMIN VIEW - कुल: {total}):</b>"
-    markup = await build_tests_markup(records, page, total, is_admin=True)
-    await message.reply(text, reply_markup=markup)
-
-@router.callback_query(F.data.startswith("adm_page_"))
-async def nav_admin_tests(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⚠️ अनुमति नहीं है!", show_alert=True)
-        return
-
-    page = int(callback.data.split("_")[2])
-    records, total = await get_all_tests_paginated(page=page)
-    
-    text = f"👑 <b>सभी यूज़र्स के टेस्ट पेपर्स (ADMIN VIEW - कुल: {total}):</b>"
-    markup = await build_tests_markup(records, page, total, is_admin=True)
-    await callback.message.edit_text(text, reply_markup=markup)
-    await callback.answer()
-
-# direct PDF button trigger
-@router.callback_query(F.data.startswith("gen_"))
-async def handle_direct_gen(callback: CallbackQuery, bot: Bot):
-    _, gen_type_key, doc_id = callback.data.split("_")
-    type_map = {"test": "Test PDF", "answer": "Answer Test PDF", "ppt": "PPT"}
-    gen_type = type_map.get(gen_type_key, "Test PDF")
-    
-    row = await get_test_paper(doc_id)
-    if not row:
-        await callback.answer("❌ ID नहीं मिला!", show_alert=True)
-        return
+        replacements = {
+            '{{TOPIC}}': str(topic), 
+            '{{QUESTION}}': f"Q{index}. {q['text']}",
+            '{{OPTION_A}}': f"A) {cl_a}", 
+            '{{OPTION_B}}': f"B) {cl_b}",
+            '{{OPTION_C}}': f"C) {cl_c}", 
+            '{{OPTION_D}}': f"D) {cl_d}"
+        }
         
-    if row.get("user_id") and row.get("user_id") != callback.from_user.id and callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ यह आपके द्वारा नहीं बनाया गया है!", show_alert=True)
-        return
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for p in shape.text_frame.paragraphs:
+                    for key, val in replacements.items():
+                        safe_replace_text_in_paragraph(p, key, val)
 
-    await callback.answer(f"⏳ {gen_type} बनाया जा रहा है...")
-    asyncio.create_task(generate_and_send(bot, callback.message.chat.id, doc_id, gen_type))
+    prs.save(output_file)
+    generated_pdf_path = output_file.rsplit('.', 1)[0] + ".pdf"
+    convert_to_pdf(output_file, generated_pdf_path)
+    return output_file, generated_pdf_path
 
-# Delete Button Handler
-@router.callback_query(F.data.startswith("del_"))
-async def handle_delete_test(callback: CallbackQuery):
-    _, doc_id, page_str, mode = callback.data.split("_")
-    page = int(page_str)
-    is_admin = (mode == "adm")
 
-    row = await get_test_paper(doc_id)
-    if not row:
-        await callback.answer("❌ ID नहीं मिला!", show_alert=True)
-        return
+def _sync_generate_docx(doc_id: str, topic: str, parsed_qs: list, gen_type: str, session_id: str, temp_dir: str):
+    """Heavy DOCX generation and conversion task (Runs in Background Worker Thread)"""
+    output_file = os.path.join(temp_dir, f"temp_{doc_id}_{session_id}.docx")
+    doc = DocxTemplate(DOCX_TEMPLATE)
+    show_answers = (gen_type == "Answer Test PDF")
+    
+    formatted_qs = []
+    for q in parsed_qs:
+        opt_a_clean = q['a'].replace("✅", "").replace("*", "").strip()
+        opt_b_clean = q['b'].replace("✅", "").replace("*", "").strip()
+        opt_c_clean = q['c'].replace("✅", "").replace("*", "").strip()
+        opt_d_clean = q['d'].replace("✅", "").replace("*", "").strip()
 
-    if row.get("user_id") and row.get("user_id") != callback.from_user.id and callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ आप इसे डिलीट नहीं कर सकते!", show_alert=True)
-        return
+        is_a_ans = "✅" in q['a'] or "*" in q['a']
+        is_b_ans = "✅" in q['b'] or "*" in q['b']
+        is_c_ans = "✅" in q['c'] or "*" in q['c']
+        is_d_ans = "✅" in q['d'] or "*" in q['d']
 
-    if await delete_test_paper(doc_id):
-        await callback.answer("✅ टेस्ट डिलीट हो गया!", show_alert=True)
-        if is_admin:
-            records, total = await get_all_tests_paginated(page=page)
-        else:
-            records, total = await get_user_tests_paginated(callback.from_user.id, page=page)
+        formatted_qs.append({
+            'text': q['text'],
+            'opt_a': f"(a) {opt_a_clean}" + ("  [Ans]" if show_answers and is_a_ans else ""),
+            'opt_b': f"(b) {opt_b_clean}" + ("  [Ans]" if show_answers and is_b_ans else ""),
+            'opt_c': f"(c) {opt_c_clean}" + ("  [Ans]" if show_answers and is_c_ans else ""),
+            'opt_d': f"(d) {opt_d_clean}" + ("  [Ans]" if show_answers and is_d_ans else ""),
+        })
+    
+    doc.render({'topic_name': topic, 'questions': formatted_qs})
+    doc.save(output_file)
+    generated_pdf_path = output_file.rsplit('.', 1)[0] + ".pdf"
+    convert_to_pdf(output_file, generated_pdf_path)
+    return output_file, generated_pdf_path
 
-        if not records and page > 1:
-            page -= 1
-            records, total = await get_all_tests_paginated(page) if is_admin else await get_user_tests_paginated(callback.from_user.id, page)
 
-        if not records:
-            await callback.message.edit_text("📂 अब कोई टेस्ट मौजूद नहीं है।")
-        else:
-            text = f"{'👑 <b>सभी यूज़र्स के टेस्ट' if is_admin else '📂 <b>आपके बनाए गए टेस्ट'} पेपर्स (कुल: {total}):</b>"
-            markup = await build_tests_markup(records, page, total, is_admin=is_admin)
-            await callback.message.edit_text(text, reply_markup=markup)
-
-@router.message(Command("stats"), StateFilter("*"))
-async def cmd_stats(message: types.Message):
+async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
+    """MongoDB से डेटा निकालकर PPT/Test/Answer PDF जनरेट करके भेजता है"""
+    msg = None
+    output_file = None
+    generated_pdf_path = None
     try:
-        count = await get_total_tests_count()
-        await message.reply(f"📊 <b>डेटाबेस आंकड़े:</b>\n\nकुल सेव किए गए टेस्ट पेपर्स: <b>{count}</b>")
+        row = await get_test_paper(doc_id)
+        if not row:
+            await bot.send_message(chat_id, "❌ <b>ID नहीं मिला!</b> कृपया सही ID दर्ज करें।")
+            return
+
+        topic = row["topic"]
+        raw_text = row["raw_text"]
+        parsed_qs = parse_raw_text(raw_text)
+
+        await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        msg = await bot.send_message(chat_id, f"⏳ <b>{gen_type}</b> जनरेट हो रहा है, कृपया प्रतीक्षा करें...")
+
+        temp_dir = tempfile.gettempdir()
+        session_id = uuid.uuid4().hex[:6]
+        loop = asyncio.get_running_loop()
+
+        if gen_type == "PPT":
+            if not os.path.exists(PPT_TEMPLATE):
+                await msg.edit_text("❌ <b>Template Missing:</b> `template.pptx` नहीं मिला!")
+                return
+            
+            # Offloading CPU task to background ThreadPool
+            output_file, generated_pdf_path = await loop.run_in_executor(
+                executor, _sync_generate_ppt, doc_id, topic, parsed_qs, session_id, temp_dir
+            )
+
+        else:
+            if not os.path.exists(DOCX_TEMPLATE):
+                await msg.edit_text("❌ <b>Template Missing:</b> `template.docx` नहीं मिला!")
+                return
+            
+            # Offloading CPU task to background ThreadPool
+            output_file, generated_pdf_path = await loop.run_in_executor(
+                executor, _sync_generate_docx, doc_id, topic, parsed_qs, gen_type, session_id, temp_dir
+            )
+
+        if generated_pdf_path and os.path.exists(generated_pdf_path):
+            await bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
+            await bot.send_document(
+                chat_id, 
+                types.FSInputFile(generated_pdf_path),
+                caption=f"📄 आपका <b>{gen_type}</b> तैयार है!\n🆔 <b>ID:</b> <code>{doc_id}</code>"
+            )
+            if msg:
+                await msg.delete()
+        else:
+            if msg:
+                await msg.edit_text("❌ <b>PDF Generation Error:</b> PDF फाइल नहीं बन सकी।")
+
     except Exception as e:
-        await message.reply(f"❌ <b>Error:</b> {html.escape(str(e))}")
+        error_msg = f"❌ <b>Error:</b> {html.escape(str(e))}"
+        if msg:
+            await msg.edit_text(error_msg)
+        else:
+            await bot.send_message(chat_id, error_msg)
 
-@router.callback_query(F.data == "btn_create")
-async def ask_topic(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await state.set_state(QuizForm.waiting_for_topic)
-    await callback.message.edit_text("🎯 <b>कृपया अपने टेस्ट पेपर का नाम (Topic Name) दर्ज करें:</b>")
+    finally:
+        await asyncio.sleep(0.5)
+        if output_file and os.path.exists(output_file): 
+            try: os.remove(output_file)
+            except: pass
+        if generated_pdf_path and os.path.exists(generated_pdf_path): 
+            try: os.remove(generated_pdf_path)
+            except: pass
 
-@router.message(QuizForm.waiting_for_topic)
-async def process_topic(message: types.Message, state: FSMContext):
-    await state.update_data(topic=message.text.strip())
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 PPT (पीपीटी)", callback_data="fmt_PPT")],
-        [InlineKeyboardButton(text="📄 Test PDF (टेस्ट पीडीएफ)", callback_data="fmt_Test PDF")],
-        [InlineKeyboardButton(text="✅ Answer Test PDF (आंसर सहित)", callback_data="fmt_Answer Test PDF")]
-    ])
-    await message.reply("📝 <b>टॉपिक सेव हो गया!</b>\n\nअब चुनें कि किस फॉर्मेट में जनरेट करना चाहते हैं:", reply_markup=keyboard)
-    await state.set_state(QuizForm.waiting_for_format)
 
-@router.callback_query(QuizForm.waiting_for_format)
-async def ask_questions(callback: CallbackQuery, state: FSMContext):
-    fmt = callback.data.replace("fmt_", "")
-    await state.update_data(selected_format=fmt, raw_questions="")
-    
-    sample = (
-        "1. भारत की राजधानी क्या है?\n"
-        "a) मुंबई\n"
-        "b) नई दिल्ली ✅\n"
-        "c) कोलकाता\n"
-        "d) चेन्नई"
-    )
-    
-    msg = (
-        f"✅ आपने <b>{fmt}</b> चुना है।\n\n"
-        "👇 <b>कृपया अपने प्रश्न इस फॉर्मेट में भेजें:</b>\n"
-        f"<code>{sample}</code>\n\n"
-        "📌 <i>नोट: प्रश्न भेजने के बाद <b>/done</b> टाइप करें।\n"
-        "रद्द करने के लिए <b>/cancel</b> दबाएं।</i>"
-    )
-    await callback.message.edit_text(msg)
-    await state.set_state(QuizForm.collecting_questions)
-
-@router.message(QuizForm.collecting_questions)
-async def collect_questions(message: types.Message, state: FSMContext, bot: Bot):
-    text = message.text.strip()
-    
-    if text.startswith('/') and text.lower() != '/done':
+async def debug_check_parsed_data(doc_id: str):
+    """डेटाबेस और पार्सर का लाइव आउटपुट चेक करने के लिए डिबग फ़ंक्शन"""
+    row = await get_test_paper(doc_id)
+    if not row:
+        print(f"❌ ID {doc_id} डेटाबेस में नहीं मिला!")
         return
-
-    if text.lower() == '/done':
-        user_data = await state.get_data()
-        raw_text = user_data.get('raw_questions', '')
-        topic = user_data.get('topic', 'Test')
-        selected_format = user_data.get('selected_format', 'Test PDF')
-        
-        if not raw_text.strip():
-            await message.reply("❌ कोई प्रश्न नहीं मिला! कृपया पहले प्रश्न भेजें।")
-            return
-
-        doc_id = uuid.uuid4().hex[:6].upper()
-        
-        try:
-            await save_test_paper(doc_id, topic, raw_text, message.from_user.id)
-        except Exception as e:
-            await message.reply(f"❌ <b>Database Insert Failed:</b> {html.escape(str(e))}")
-            return
-
-        success_msg = (
-            f"✅ <b>डेटा सेव हो गया!</b>\n\n"
-            f"🔑 <b>आपकी Test ID:</b> <code>{doc_id}</code>\n\n"
-            f"💡 <b>भविष्य में इस ID से डाउनलोड करें:</b>\n"
-            f"• PPT: <code>/ppt {doc_id}</code>\n"
-            f"• Test PDF: <code>/test {doc_id}</code>\n"
-            f"• Answer PDF: <code>/answer {doc_id}</code>\n\n"
-            f"<i>अभी आपका ({selected_format}) जनरेट किया जा रहा है...</i>"
-        )
-        await message.reply(success_msg)
-        await state.clear()
-        
-        # Async Task me execute hoga, bot freeze nahi hoga
-        asyncio.create_task(generate_and_send(bot, message.chat.id, doc_id, selected_format))
-        return
-
-    user_data = await state.get_data()
-    current_raw = user_data.get('raw_questions', '')
-    new_raw = current_raw + "\n\n" + text if current_raw else text
-    await state.update_data(raw_questions=new_raw)
     
-    parsed = parse_raw_text(new_raw)
-    await message.reply(f"📥 <b>प्रश्न जोड़ दिए गए! (कुल: {len(parsed)})</b>\nऔर प्रश्न भेजें या <b>/done</b> टाइप करें।")
-
-# 🔗 ID Command Handlers
-@router.message(Command("ppt"), StateFilter("*"))
-async def cmd_ppt(message: types.Message, bot: Bot):
-    args = message.text.split()
-    if len(args) < 2:
-        await message.reply("⚠️ कृपया ID दर्ज करें। उदाहरण: <code>/ppt A1B2C3</code>")
-        return
-    asyncio.create_task(generate_and_send(bot, message.chat.id, args[1].strip().upper(), "PPT"))
-
-@router.message(Command("test"), StateFilter("*"))
-async def cmd_test(message: types.Message, bot: Bot):
-    args = message.text.split()
-    if len(args) < 2:
-        await message.reply("⚠️ कृपया ID दर्ज करें। उदाहरण: <code>/test A1B2C3</code>")
-        return
-    asyncio.create_task(generate_and_send(bot, message.chat.id, args[1].strip().upper(), "Test PDF"))
-
-@router.message(Command("answer"), StateFilter("*"))
-async def cmd_answer(message: types.Message, bot: Bot):
-    args = message.text.split()
-    if len(args) < 2:
-        await message.reply("⚠️ कृपया ID दर्ज करें। उदाहरण: <code>/answer A1B2C3</code>")
-        return
-    asyncio.create_task(generate_and_send(bot, message.chat.id, args[1].strip().upper(), "Answer Test PDF"))
+    raw_text = row.get("raw_text", "")
+    parsed = parse_raw_text(raw_text)
+    
+    print("\n" + "="*50)
+    print(f"🔍 DEBUG REPORT FOR DOC ID: {doc_id}")
+    print("="*50)
+    print("1. RAW TEXT FROM DATABASE:")
+    print(raw_text)
+    print("-" * 50)
+    print("2. PARSED RESULT (dictionary):")
+    for idx, q in enumerate(parsed, 1):
+        print(f"  Q{idx}: {q.get('text')}")
+        print(f"     A) {q.get('a')}")
+        print(f"     B) {q.get('b')}")
+        print(f"     C) {q.get('c')}")
+        print(f"     D) {q.get('d')}")
+    print("="*50 + "\n")
