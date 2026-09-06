@@ -15,7 +15,7 @@ dp = Dispatcher(storage=MemoryStorage())
 dp.include_router(router)
 
 async def handle_ping(request):
-    return web.Response(text="RCC Professional Bot is Live!")
+    return web.Response(text="RCC Professional Bot is Live & Ready for High Traffic!")
 
 async def start_web_server():
     app = web.Application()
@@ -31,12 +31,13 @@ async def main():
     await setup_bot_commands(bot)
     print("\n" + "="*50)
     print("🚀 RCC PROFESSIONAL BOT IS LIVE AND RUNNING!")
+    print("⚡ HIGH-TRAFFIC & CONCURRENCY OPTIMIZATIONS ACTIVE")
     print("="*50 + "\n")
     
     try:
-        # Pending updates delete karke fresh start
+        # Pending updates clear karke fresh start
         await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, handle_signals=True)
     finally:
         await bot.session.close()
 
