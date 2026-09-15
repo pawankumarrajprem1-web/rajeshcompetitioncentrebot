@@ -7,7 +7,7 @@ import uuid
 from aiogram import Bot, types
 from aiogram.enums import ChatAction
 from pptx import Presentation
-from docxtpl import DocxTemplate
+from docxtpl import DocxTemplate, RichText
 
 from config import PPT_TEMPLATE, DOCX_TEMPLATE
 from database import get_test_paper
@@ -128,12 +128,29 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
                 is_c_ans = "✅" in q['c'] or "*" in q['c']
                 is_d_ans = "✅" in q['d'] or "*" in q['d']
 
+                # RichText का उपयोग करके सही ऑप्शन को Bold करना (बिना [Ans] लिखे)
+                rt_a = RichText(f"(a) {opt_a_clean}")
+                if show_answers and is_a_ans:
+                    rt_a.bold = True
+
+                rt_b = RichText(f"(b) {opt_b_clean}")
+                if show_answers and is_b_ans:
+                    rt_b.bold = True
+
+                rt_c = RichText(f"(c) {opt_c_clean}")
+                if show_answers and is_c_ans:
+                    rt_c.bold = True
+
+                rt_d = RichText(f"(d) {opt_d_clean}")
+                if show_answers and is_d_ans:
+                    rt_d.bold = True
+
                 formatted_qs.append({
                     'text': q['text'],
-                    'opt_a': f"(a) {opt_a_clean}" + ("  [Ans]" if show_answers and is_a_ans else ""),
-                    'opt_b': f"(b) {opt_b_clean}" + ("  [Ans]" if show_answers and is_b_ans else ""),
-                    'opt_c': f"(c) {opt_c_clean}" + ("  [Ans]" if show_answers and is_c_ans else ""),
-                    'opt_d': f"(d) {opt_d_clean}" + ("  [Ans]" if show_answers and is_d_ans else ""),
+                    'opt_a': rt_a,
+                    'opt_b': rt_b,
+                    'opt_c': rt_c,
+                    'opt_d': rt_d,
                 })
             
             doc.render({'topic_name': topic, 'questions': formatted_qs})
