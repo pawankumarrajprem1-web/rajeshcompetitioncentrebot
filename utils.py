@@ -3,20 +3,20 @@ import re
 import sys
 import subprocess
 import shutil
-import uuid
 import time
 from docxtpl import RichText
 
-def convert_to_pdf(input_file: str, output_pdf_path: str):
-    """Windows aur Linux / Render Server dono par DOCX/PPTX ko PDF banata hai (High Concurrency Ready)"""
+def convert_to_pdf(input_file, output_pdf_path):
+    """Windows aur Linux / Render Server dono par DOCX/PPTX ko PDF banata hai"""
     abs_input = os.path.abspath(input_file)
     abs_output = os.path.abspath(output_pdf_path)
     abs_outdir = os.path.dirname(abs_output)
 
     # ==========================================
-    # 1. WINDOWS OS (Local Testing)
+    # 1. WINDOWS OS (Local VS Code Testing)
     # ==========================================
     if os.name == 'nt':
+        # Step A: LibreOffice check
         libre_paths = [
             r"C:\Program Files\LibreOffice\program\soffice.exe",
             r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
@@ -25,7 +25,7 @@ def convert_to_pdf(input_file: str, output_pdf_path: str):
         for soffice_path in libre_paths:
             try:
                 cmd = [soffice_path, "--headless", "--convert-to", "pdf", abs_input, "--outdir", abs_outdir]
-                subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+                subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 
                 gen_pdf = os.path.splitext(abs_input)[0] + ".pdf"
                 if os.path.exists(gen_pdf):
@@ -37,6 +37,7 @@ def convert_to_pdf(input_file: str, output_pdf_path: str):
             except Exception:
                 continue
 
+        # Step B: PPTX ke liye PowerPoint COM Automation
         if input_file.lower().endswith(('.pptx', '.ppt')):
             try:
                 import comtypes.client
@@ -56,6 +57,7 @@ def convert_to_pdf(input_file: str, output_pdf_path: str):
                 try: comtypes.CoUninitialize()
                 except: pass
 
+        # Step C: DOCX ke liye docx2pdf
         if input_file.lower().endswith(('.docx', '.doc')):
             try:
                 from docx2pdf import convert
@@ -66,15 +68,13 @@ def convert_to_pdf(input_file: str, output_pdf_path: str):
                 raise Exception(f"DOCX to PDF Error: {str(e)}")
 
         if not os.path.exists(abs_output):
-            raise Exception("Windows पर PDF जनरेट नहीं हो सका। कृपया LibreOffice या MS Office चेक करें।")
+            raise Exception("Windows पर PDF जनरेट नहीं हो सका। कृपया LibreOffice या MS PowerPoint/Word चेक करें।")
 
     # ==========================================
     # 2. LINUX / RENDER SERVER (Docker Environment)
     # ==========================================
     else:
-        # Har parallel conversion ke liye alag unique libreoffice profile
-        unique_id = uuid.uuid4().hex[:8]
-        user_profile_dir = os.path.join(abs_outdir, f"lo_profile_{unique_id}")
+        user_profile_dir = os.path.join(abs_outdir, "lo_profile")
         os.makedirs(user_profile_dir, exist_ok=True)
         
         export_filter = "pdf:impress_pdf_Export" if input_file.lower().endswith(('.pptx', '.ppt')) else "pdf:writer_pdf_Export"
@@ -92,31 +92,28 @@ def convert_to_pdf(input_file: str, output_pdf_path: str):
             abs_input,
             "--outdir", abs_outdir
         ]
+        env = os.environ.copy()
         
-        try:
-            env = os.environ.copy()
-            result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=120)
-            
-            gen_pdf = os.path.splitext(abs_input)[0] + ".pdf"
-            if os.path.exists(gen_pdf) and gen_pdf != abs_output:
-                if os.path.exists(abs_output):
-                    os.remove(abs_output)
-                os.rename(gen_pdf, abs_output)
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        
+        if os.path.exists(user_profile_dir):
+            shutil.rmtree(user_profile_dir, ignore_errors=True)
 
-            if not os.path.exists(abs_output):
-                raise Exception(f"Linux PDF Conversion Failed!\nSTDERR: {result.stderr}")
-        finally:
-            if os.path.exists(user_profile_dir):
-                shutil.rmtree(user_profile_dir, ignore_errors=True)
+        gen_pdf = os.path.splitext(abs_input)[0] + ".pdf"
+        if os.path.exists(gen_pdf) and gen_pdf != abs_output:
+            if os.path.exists(abs_output):
+                os.remove(abs_output)
+            os.rename(gen_pdf, abs_output)
+
+        if not os.path.exists(abs_output):
+            raise Exception(f"Linux PDF Conversion Failed!\nSTDERR: {result.stderr}")
 
 
-def parse_raw_text(raw_text: str):
-    """Raw text se fast aur clean parsing"""
+def parse_raw_text(raw_text):
     questions_list = []
+    # Question numbers se split karein (e.g., 1., 2), 3-)
     q_blocks = re.split(r'\n(?=\s*\d+[\.\)\-])', '\n' + raw_text.strip())
     
-    clean_pattern = re.compile(r'^[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}\s]+\s*')
-
     for block in q_blocks:
         if not block.strip(): 
             continue
@@ -125,12 +122,18 @@ def parse_raw_text(raw_text: str):
         if not lines: 
             continue
             
+        # Pehli line Question Text hai
         q_text = re.sub(r'^\d+[\.\)\-]\s*', '', lines[0])
         opt_lines = lines[1:]
         
+        val_a, val_b, val_c, val_d = "", "", "", ""
+        
+        # Har option ke aage se a), b), c), d) ya (a), (b) jaisa prefix hatane ke liye
+        clean_pattern = r'^[\(\[\{]?[a-dA-D1-4अ-दक-घ][\.\)\-\]\}\s]+\s*'
+        
         cleaned_options = []
         for line in opt_lines:
-            clean_opt = clean_pattern.sub('', line).strip()
+            clean_opt = re.sub(clean_pattern, '', line).strip()
             if clean_opt:
                 cleaned_options.append(clean_opt)
                 
@@ -150,16 +153,18 @@ def parse_raw_text(raw_text: str):
     return questions_list
 
 
-def format_docx_option(label: str, opt_text: str, show_answer: bool = False):
+def format_docx_option(label, opt_text, show_answer=False):
     if not opt_text: 
         return ""
         
     rt = RichText()
     is_answer = "✅" in opt_text or "*" in opt_text
+    
+    # Green Tick ya Asterisk ko text se saaf karein
     cleaned = opt_text.replace("✅", "").replace("*", "").strip()
     
     if show_answer and is_answer:
-        rt.add(f"{label} {cleaned}", bold=True, color="008000")
+        rt.add(f"{label} {cleaned}", bold=True, color="008000") # Answer mode me Bold aur Green
     else:
         rt.add(f"{label} {cleaned}", bold=False)
         
