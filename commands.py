@@ -1,7 +1,6 @@
 import uuid
 import html
 import math
-import asyncio
 from aiogram import Router, types, F, Bot
 from aiogram.filters import CommandStart, Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -44,7 +43,7 @@ async def setup_bot_commands(bot_instance: Bot):
     ]
     await bot_instance.set_my_commands(commands)
 
-async def build_tests_markup(records, page, total_count, is_admin=False):
+def build_tests_markup(records, page, total_count, is_admin=False):
     """पेजिंग और डायरेक्ट एक्शन बटन्स (Test, Ans, PPT, Delete)"""
     keyboard = []
     page_size = 5
@@ -178,24 +177,24 @@ async def cmd_help(event: types.Message | CallbackQuery):
 async def cmd_mytests(message: types.Message):
     page = 1
     user_id = message.from_user.id
-    records, total = await get_user_tests_paginated(user_id, page=page)
+    records, total = get_user_tests_paginated(user_id, page=page)
     
     if not records:
-        await message.reply("📂आपने अभी तक कोई टेस्ट पेपर नहीं बनाया है।")
+        await message.reply("📂 आपने अभी तक कोई टेस्ट पेपर नहीं बनाया है।")
         return
 
     text = f"📂 <b>आपके बनाए गए टेस्ट पेपर्स (कुल: {total}):</b>"
-    markup = await build_tests_markup(records, page, total, is_admin=False)
+    markup = build_tests_markup(records, page, total, is_admin=False)
     await message.reply(text, reply_markup=markup)
 
 @router.callback_query(F.data.startswith("usr_page_"))
 async def nav_user_tests(callback: CallbackQuery):
     page = int(callback.data.split("_")[2])
     user_id = callback.from_user.id
-    records, total = await get_user_tests_paginated(user_id, page=page)
+    records, total = get_user_tests_paginated(user_id, page=page)
     
     text = f"📂 <b>आपके बनाए गए टेस्ट पेपर्स (कुल: {total}):</b>"
-    markup = await build_tests_markup(records, page, total, is_admin=False)
+    markup = build_tests_markup(records, page, total, is_admin=False)
     await callback.message.edit_text(text, reply_markup=markup)
     await callback.answer()
 
@@ -207,13 +206,13 @@ async def cmd_alltests(message: types.Message):
         return
 
     page = 1
-    records, total = await get_all_tests_paginated(page=page)
+    records, total = get_all_tests_paginated(page=page)
     if not records:
         await message.reply("📂 डेटाबेस में कोई भी टेस्ट मौजूद नहीं है।")
         return
 
     text = f"👑 <b>सभी यूज़र्स के टेस्ट पेपर्स (ADMIN VIEW - कुल: {total}):</b>"
-    markup = await build_tests_markup(records, page, total, is_admin=True)
+    markup = build_tests_markup(records, page, total, is_admin=True)
     await message.reply(text, reply_markup=markup)
 
 @router.callback_query(F.data.startswith("adm_page_"))
@@ -223,10 +222,10 @@ async def nav_admin_tests(callback: CallbackQuery):
         return
 
     page = int(callback.data.split("_")[2])
-    records, total = await get_all_tests_paginated(page=page)
+    records, total = get_all_tests_paginated(page=page)
     
     text = f"👑 <b>सभी यूज़र्स के टेस्ट पेपर्स (ADMIN VIEW - कुल: {total}):</b>"
-    markup = await build_tests_markup(records, page, total, is_admin=True)
+    markup = build_tests_markup(records, page, total, is_admin=True)
     await callback.message.edit_text(text, reply_markup=markup)
     await callback.answer()
 
@@ -237,7 +236,7 @@ async def handle_direct_gen(callback: CallbackQuery, bot: Bot):
     type_map = {"test": "Test PDF", "answer": "Answer Test PDF", "ppt": "PPT"}
     gen_type = type_map.get(gen_type_key, "Test PDF")
     
-    row = await get_test_paper(doc_id)
+    row = get_test_paper(doc_id)
     if not row:
         await callback.answer("❌ ID नहीं मिला!", show_alert=True)
         return
@@ -247,7 +246,10 @@ async def handle_direct_gen(callback: CallbackQuery, bot: Bot):
         return
 
     await callback.answer(f"⏳ {gen_type} बनाया जा रहा है...")
-    asyncio.create_task(generate_and_send(bot, callback.message.chat.id, doc_id, gen_type))
+    try:
+        await generate_and_send(bot, callback.message.chat.id, doc_id, gen_type)
+    except Exception as e:
+        await callback.message.reply(f"❌ Error: {html.escape(str(e))}")
 
 # Delete Button Handler
 @router.callback_query(F.data.startswith("del_"))
@@ -256,7 +258,7 @@ async def handle_delete_test(callback: CallbackQuery):
     page = int(page_str)
     is_admin = (mode == "adm")
 
-    row = await get_test_paper(doc_id)
+    row = get_test_paper(doc_id)
     if not row:
         await callback.answer("❌ ID नहीं मिला!", show_alert=True)
         return
@@ -265,28 +267,28 @@ async def handle_delete_test(callback: CallbackQuery):
         await callback.answer("⛔ आप इसे डिलीट नहीं कर सकते!", show_alert=True)
         return
 
-    if await delete_test_paper(doc_id):
+    if delete_test_paper(doc_id):
         await callback.answer("✅ टेस्ट डिलीट हो गया!", show_alert=True)
         if is_admin:
-            records, total = await get_all_tests_paginated(page=page)
+            records, total = get_all_tests_paginated(page=page)
         else:
-            records, total = await get_user_tests_paginated(callback.from_user.id, page=page)
+            records, total = get_user_tests_paginated(callback.from_user.id, page=page)
 
         if not records and page > 1:
             page -= 1
-            records, total = await get_all_tests_paginated(page) if is_admin else await get_user_tests_paginated(callback.from_user.id, page)
+            records, total = get_all_tests_paginated(page) if is_admin else get_user_tests_paginated(callback.from_user.id, page)
 
         if not records:
             await callback.message.edit_text("📂 अब कोई टेस्ट मौजूद नहीं है।")
         else:
             text = f"{'👑 <b>सभी यूज़र्स के टेस्ट' if is_admin else '📂 <b>आपके बनाए गए टेस्ट'} पेपर्स (कुल: {total}):</b>"
-            markup = await build_tests_markup(records, page, total, is_admin=is_admin)
+            markup = build_tests_markup(records, page, total, is_admin=is_admin)
             await callback.message.edit_text(text, reply_markup=markup)
 
 @router.message(Command("stats"), StateFilter("*"))
 async def cmd_stats(message: types.Message):
     try:
-        count = await get_total_tests_count()
+        count = get_total_tests_count()
         await message.reply(f"📊 <b>डेटाबेस आंकड़े:</b>\n\nकुल सेव किए गए टेस्ट पेपर्स: <b>{count}</b>")
     except Exception as e:
         await message.reply(f"❌ <b>Error:</b> {html.escape(str(e))}")
@@ -352,7 +354,7 @@ async def collect_questions(message: types.Message, state: FSMContext, bot: Bot)
         doc_id = uuid.uuid4().hex[:6].upper()
         
         try:
-            await save_test_paper(doc_id, topic, raw_text, message.from_user.id)
+            save_test_paper(doc_id, topic, raw_text, message.from_user.id)
         except Exception as e:
             await message.reply(f"❌ <b>Database Insert Failed:</b> {html.escape(str(e))}")
             return
@@ -369,8 +371,10 @@ async def collect_questions(message: types.Message, state: FSMContext, bot: Bot)
         await message.reply(success_msg)
         await state.clear()
         
-        # Async Task me execute hoga, bot freeze nahi hoga
-        asyncio.create_task(generate_and_send(bot, message.chat.id, doc_id, selected_format))
+        try:
+            await generate_and_send(bot, message.chat.id, doc_id, selected_format)
+        except Exception as e:
+            await message.reply(f"❌ <b>Error:</b> {html.escape(str(e))}")
         return
 
     user_data = await state.get_data()
@@ -381,14 +385,17 @@ async def collect_questions(message: types.Message, state: FSMContext, bot: Bot)
     parsed = parse_raw_text(new_raw)
     await message.reply(f"📥 <b>प्रश्न जोड़ दिए गए! (कुल: {len(parsed)})</b>\nऔर प्रश्न भेजें या <b>/done</b> टाइप करें।")
 
-# 🔗 ID Command Handlers
+# 🔗 पुराने वाले ID कमांड्स (Exact same behaviour kept)
 @router.message(Command("ppt"), StateFilter("*"))
 async def cmd_ppt(message: types.Message, bot: Bot):
     args = message.text.split()
     if len(args) < 2:
         await message.reply("⚠️ कृपया ID दर्ज करें। उदाहरण: <code>/ppt A1B2C3</code>")
         return
-    asyncio.create_task(generate_and_send(bot, message.chat.id, args[1].strip().upper(), "PPT"))
+    try:
+        await generate_and_send(bot, message.chat.id, args[1].strip().upper(), "PPT")
+    except Exception as e:
+        await message.reply(f"❌ <b>Error:</b> {html.escape(str(e))}")
 
 @router.message(Command("test"), StateFilter("*"))
 async def cmd_test(message: types.Message, bot: Bot):
@@ -396,7 +403,10 @@ async def cmd_test(message: types.Message, bot: Bot):
     if len(args) < 2:
         await message.reply("⚠️ कृपया ID दर्ज करें। उदाहरण: <code>/test A1B2C3</code>")
         return
-    asyncio.create_task(generate_and_send(bot, message.chat.id, args[1].strip().upper(), "Test PDF"))
+    try:
+        await generate_and_send(bot, message.chat.id, args[1].strip().upper(), "Test PDF")
+    except Exception as e:
+        await message.reply(f"❌ <b>Error:</b> {html.escape(str(e))}")
 
 @router.message(Command("answer"), StateFilter("*"))
 async def cmd_answer(message: types.Message, bot: Bot):
@@ -404,4 +414,7 @@ async def cmd_answer(message: types.Message, bot: Bot):
     if len(args) < 2:
         await message.reply("⚠️ कृपया ID दर्ज करें। उदाहरण: <code>/answer A1B2C3</code>")
         return
-    asyncio.create_task(generate_and_send(bot, message.chat.id, args[1].strip().upper(), "Answer Test PDF"))
+    try:
+        await generate_and_send(bot, message.chat.id, args[1].strip().upper(), "Answer Test PDF")
+    except Exception as e:
+        await message.reply(f"❌ <b>Error:</b> {html.escape(str(e))}")
