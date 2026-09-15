@@ -7,7 +7,7 @@ import uuid
 from aiogram import Bot, types
 from aiogram.enums import ChatAction
 from pptx import Presentation
-from docxtpl import DocxTemplate
+from docxtpl import DocxTemplate, RichText
 
 from config import PPT_TEMPLATE, DOCX_TEMPLATE
 from database import get_test_paper
@@ -128,25 +128,29 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
                 is_c_ans = "✅" in q['c'] or "*" in q['c']
                 is_d_ans = "✅" in q['d'] or "*" in q['d']
 
-                # बेसिक टेक्स्ट स्ट्रिंग बनाएं (बिना [Ans] के)
-                str_a = f"(a) {opt_a_clean}"
-                str_b = f"(b) {opt_b_clean}"
-                str_c = f"(c) {opt_c_clean}"
-                str_d = f"(d) {opt_d_clean}"
+                # RichText का उपयोग करके विकल्प बनाना (ताकि विकल्प गायब न हों)
+                rt_a = RichText(f"(a) {opt_a_clean}")
+                if show_answers and is_a_ans:
+                    rt_a.bold = True
 
-                # अगर Answer PDF है, तो सही उत्तर वाले ऑप्शन के चारों ओर Word का Bold XML tag लगा दें
-                if show_answers:
-                    if is_a_ans: str_a = f"<b>{str_a}</b>"
-                    if is_b_ans: str_b = f"<b>{str_b}</b>"
-                    if is_c_ans: str_c = f"<b>{str_c}</b>"
-                    if is_d_ans: str_d = f"<b>{str_d}</b>"
+                rt_b = RichText(f"(b) {opt_b_clean}")
+                if show_answers and is_b_ans:
+                    rt_b.bold = True
+
+                rt_c = RichText(f"(c) {opt_c_clean}")
+                if show_answers and is_c_ans:
+                    rt_c.bold = True
+
+                rt_d = RichText(f"(d) {opt_d_clean}")
+                if show_answers and is_d_ans:
+                    rt_d.bold = True
 
                 formatted_qs.append({
                     'text': q['text'],
-                    'opt_a': str_a,
-                    'opt_b': str_b,
-                    'opt_c': str_c,
-                    'opt_d': str_d,
+                    'opt_a': rt_a,
+                    'opt_b': rt_b,
+                    'opt_c': rt_c,
+                    'opt_d': rt_d,
                 })
             
             doc.render({'topic_name': topic, 'questions': formatted_qs})
