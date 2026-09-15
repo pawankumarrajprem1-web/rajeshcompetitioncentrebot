@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-# System Dependencies & LibreOffice Installation
+# Install LibreOffice, Xvfb, xauth and Fonts
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice \
     libreoffice-impress \
@@ -20,22 +20,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Environment Setup for High Concurrency & Memory Savings
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8080
-
-# Custom Fonts handling (Safe copy even if empty)
-RUN mkdir -p /usr/share/fonts/truetype/custom_fonts/
+# Copy custom fonts
 COPY fonts/ /usr/share/fonts/truetype/custom_fonts/
 RUN fc-cache -f -v
 
-# Install Python Requirements
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+ENV PYTHONUNBUFFERED=1
 
-# Copy Application Files
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 COPY . .
 
 EXPOSE 8080
