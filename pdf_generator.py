@@ -9,7 +9,7 @@ from aiogram.enums import ChatAction
 from pptx import Presentation
 from docxtpl import DocxTemplate
 
-from config import PPT_TEMPLATE, DOCX_TEMPLATE, executor
+from config import PPT_TEMPLATE, DOCX_TEMPLATE
 from database import get_test_paper
 from utils import parse_raw_text, convert_to_pdf
 
@@ -31,90 +31,13 @@ def safe_replace_text_in_paragraph(paragraph, old_key, new_val):
             run.text = ""
 
 
-def _sync_generate_ppt(doc_id: str, topic: str, parsed_qs: list, session_id: str, temp_dir: str):
-    """Heavy PPT generation and conversion task (Runs in Background Worker Thread)"""
-    output_file = os.path.join(temp_dir, f"temp_{doc_id}_{session_id}.pptx")
-    prs = Presentation(PPT_TEMPLATE)
-    
-    base_slide = prs.slides[0]
-    blank_layout = base_slide.slide_layout
-
-    total_qs = len(parsed_qs)
-    for _ in range(total_qs - 1):
-        new_slide = prs.slides.add_slide(blank_layout)
-        sp_tree = getattr(new_slide.shapes, '_spTree', getattr(new_slide.shapes, '_sptree', None))
-        for shape in base_slide.shapes:
-            new_el = copy.deepcopy(shape.element)
-            if sp_tree is not None:
-                sp_tree.insert_element_before(new_el, 'p:extLst')
-
-    for index, (slide, q) in enumerate(zip(prs.slides, parsed_qs), 1):
-        cl_a = q['a'].replace("✅", "").replace("*", "").strip()
-        cl_b = q['b'].replace("✅", "").replace("*", "").strip()
-        cl_c = q['c'].replace("✅", "").replace("*", "").strip()
-        cl_d = q['d'].replace("✅", "").replace("*", "").strip()
-        
-        replacements = {
-            '{{TOPIC}}': str(topic), 
-            '{{QUESTION}}': f"Q{index}. {q['text']}",
-            '{{OPTION_A}}': f"A) {cl_a}", 
-            '{{OPTION_B}}': f"B) {cl_b}",
-            '{{OPTION_C}}': f"C) {cl_c}", 
-            '{{OPTION_D}}': f"D) {cl_d}"
-        }
-        
-        for shape in slide.shapes:
-            if shape.has_text_frame:
-                for p in shape.text_frame.paragraphs:
-                    for key, val in replacements.items():
-                        safe_replace_text_in_paragraph(p, key, val)
-
-    prs.save(output_file)
-    generated_pdf_path = output_file.rsplit('.', 1)[0] + ".pdf"
-    convert_to_pdf(output_file, generated_pdf_path)
-    return output_file, generated_pdf_path
-
-
-def _sync_generate_docx(doc_id: str, topic: str, parsed_qs: list, gen_type: str, session_id: str, temp_dir: str):
-    """Heavy DOCX generation and conversion task (Runs in Background Worker Thread)"""
-    output_file = os.path.join(temp_dir, f"temp_{doc_id}_{session_id}.docx")
-    doc = DocxTemplate(DOCX_TEMPLATE)
-    show_answers = (gen_type == "Answer Test PDF")
-    
-    formatted_qs = []
-    for q in parsed_qs:
-        opt_a_clean = q['a'].replace("✅", "").replace("*", "").strip()
-        opt_b_clean = q['b'].replace("✅", "").replace("*", "").strip()
-        opt_c_clean = q['c'].replace("✅", "").replace("*", "").strip()
-        opt_d_clean = q['d'].replace("✅", "").replace("*", "").strip()
-
-        is_a_ans = "✅" in q['a'] or "*" in q['a']
-        is_b_ans = "✅" in q['b'] or "*" in q['b']
-        is_c_ans = "✅" in q['c'] or "*" in q['c']
-        is_d_ans = "✅" in q['d'] or "*" in q['d']
-
-        formatted_qs.append({
-            'text': q['text'],
-            'opt_a': f"(a) {opt_a_clean}" + ("  [Ans]" if show_answers and is_a_ans else ""),
-            'opt_b': f"(b) {opt_b_clean}" + ("  [Ans]" if show_answers and is_b_ans else ""),
-            'opt_c': f"(c) {opt_c_clean}" + ("  [Ans]" if show_answers and is_c_ans else ""),
-            'opt_d': f"(d) {opt_d_clean}" + ("  [Ans]" if show_answers and is_d_ans else ""),
-        })
-    
-    doc.render({'topic_name': topic, 'questions': formatted_qs})
-    doc.save(output_file)
-    generated_pdf_path = output_file.rsplit('.', 1)[0] + ".pdf"
-    convert_to_pdf(output_file, generated_pdf_path)
-    return output_file, generated_pdf_path
-
-
 async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
     """MongoDB से डेटा निकालकर PPT/Test/Answer PDF जनरेट करके भेजता है"""
     msg = None
     output_file = None
     generated_pdf_path = None
     try:
-        row = await get_test_paper(doc_id)
+        row = get_test_paper(doc_id)
         if not row:
             await bot.send_message(chat_id, "❌ <b>ID नहीं मिला!</b> कृपया सही ID दर्ज करें।")
             return
@@ -122,33 +45,101 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
         topic = row["topic"]
         raw_text = row["raw_text"]
         parsed_qs = parse_raw_text(raw_text)
+        
+        # 🔍 डिबग फ़ंक्शन को यहाँ कॉल किया गया है (टर्मिनल में लॉग्स देखने के लिए)
+        try:
+            debug_check_parsed_data(doc_id)
+        except Exception as dbg_err:
+            print(f"Debug function error: {dbg_err}")
 
         await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
         msg = await bot.send_message(chat_id, f"⏳ <b>{gen_type}</b> जनरेट हो रहा है, कृपया प्रतीक्षा करें...")
 
         temp_dir = tempfile.gettempdir()
         session_id = uuid.uuid4().hex[:6]
+        
         loop = asyncio.get_running_loop()
 
         if gen_type == "PPT":
             if not os.path.exists(PPT_TEMPLATE):
                 await msg.edit_text("❌ <b>Template Missing:</b> `template.pptx` नहीं मिला!")
                 return
+                
+            output_file = os.path.join(temp_dir, f"temp_{doc_id}_{session_id}.pptx")
+            prs = Presentation(PPT_TEMPLATE)
             
-            # Offloading CPU task to background ThreadPool
-            output_file, generated_pdf_path = await loop.run_in_executor(
-                executor, _sync_generate_ppt, doc_id, topic, parsed_qs, session_id, temp_dir
-            )
+            base_slide = prs.slides[0]
+            blank_layout = base_slide.slide_layout
+
+            total_qs = len(parsed_qs)
+            for _ in range(total_qs - 1):
+                new_slide = prs.slides.add_slide(blank_layout)
+                sp_tree = getattr(new_slide.shapes, '_spTree', getattr(new_slide.shapes, '_sptree', None))
+                for shape in base_slide.shapes:
+                    new_el = copy.deepcopy(shape.element)
+                    if sp_tree is not None:
+                        sp_tree.insert_element_before(new_el, 'p:extLst')
+
+            for index, (slide, q) in enumerate(zip(prs.slides, parsed_qs), 1):
+                cl_a = q['a'].replace("✅", "").replace("*", "").strip()
+                cl_b = q['b'].replace("✅", "").replace("*", "").strip()
+                cl_c = q['c'].replace("✅", "").replace("*", "").strip()
+                cl_d = q['d'].replace("✅", "").replace("*", "").strip()
+                
+                replacements = {
+                    '{{TOPIC}}': str(topic), 
+                    '{{QUESTION}}': f"Q{index}. {q['text']}",
+                    '{{OPTION_A}}': f"A) {cl_a}", 
+                    '{{OPTION_B}}': f"B) {cl_b}",
+                    '{{OPTION_C}}': f"C) {cl_c}", 
+                    '{{OPTION_D}}': f"D) {cl_d}"
+                }
+                
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        for p in shape.text_frame.paragraphs:
+                            for key, val in replacements.items():
+                                safe_replace_text_in_paragraph(p, key, val)
+
+            prs.save(output_file)
+            generated_pdf_path = output_file.rsplit('.', 1)[0] + ".pdf"
+            await loop.run_in_executor(None, convert_to_pdf, output_file, generated_pdf_path)
 
         else:
             if not os.path.exists(DOCX_TEMPLATE):
                 await msg.edit_text("❌ <b>Template Missing:</b> `template.docx` नहीं मिला!")
                 return
+                
+            output_file = os.path.join(temp_dir, f"temp_{doc_id}_{session_id}.docx")
+            doc = DocxTemplate(DOCX_TEMPLATE)
+            show_answers = (gen_type == "Answer Test PDF")
             
-            # Offloading CPU task to background ThreadPool
-            output_file, generated_pdf_path = await loop.run_in_executor(
-                executor, _sync_generate_docx, doc_id, topic, parsed_qs, gen_type, session_id, temp_dir
-            )
+            formatted_qs = []
+            for q in parsed_qs:
+                # Green tick/star साफ करें
+                opt_a_clean = q['a'].replace("✅", "").replace("*", "").strip()
+                opt_b_clean = q['b'].replace("✅", "").replace("*", "").strip()
+                opt_c_clean = q['c'].replace("✅", "").replace("*", "").strip()
+                opt_d_clean = q['d'].replace("✅", "").replace("*", "").strip()
+
+                # चेक करें कि कौन सा ऑप्शन सही उत्तर है
+                is_a_ans = "✅" in q['a'] or "*" in q['a']
+                is_b_ans = "✅" in q['b'] or "*" in q['b']
+                is_c_ans = "✅" in q['c'] or "*" in q['c']
+                is_d_ans = "✅" in q['d'] or "*" in q['d']
+
+                formatted_qs.append({
+                    'text': q['text'],
+                    'opt_a': f"(a) {opt_a_clean}" + ("  [Ans]" if show_answers and is_a_ans else ""),
+                    'opt_b': f"(b) {opt_b_clean}" + ("  [Ans]" if show_answers and is_b_ans else ""),
+                    'opt_c': f"(c) {opt_c_clean}" + ("  [Ans]" if show_answers and is_c_ans else ""),
+                    'opt_d': f"(d) {opt_d_clean}" + ("  [Ans]" if show_answers and is_d_ans else ""),
+                })
+            
+            doc.render({'topic_name': topic, 'questions': formatted_qs})
+            doc.save(output_file)
+            generated_pdf_path = output_file.rsplit('.', 1)[0] + ".pdf"
+            await loop.run_in_executor(None, convert_to_pdf, output_file, generated_pdf_path)
 
         if generated_pdf_path and os.path.exists(generated_pdf_path):
             await bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
@@ -171,7 +162,7 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             await bot.send_message(chat_id, error_msg)
 
     finally:
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
         if output_file and os.path.exists(output_file): 
             try: os.remove(output_file)
             except: pass
@@ -180,9 +171,9 @@ async def generate_and_send(bot: Bot, chat_id: int, doc_id: str, gen_type: str):
             except: pass
 
 
-async def debug_check_parsed_data(doc_id: str):
+def debug_check_parsed_data(doc_id: str):
     """डेटाबेस और पार्सर का लाइव आउटपुट चेक करने के लिए डिबग फ़ंक्शन"""
-    row = await get_test_paper(doc_id)
+    row = get_test_paper(doc_id)
     if not row:
         print(f"❌ ID {doc_id} डेटाबेस में नहीं मिला!")
         return
